@@ -482,7 +482,8 @@ async function askAI(prompt, images, purpose) {
   if (p === "gemini") {
     if (!settings.geminiKey) throw new Error("Add your Gemini key in Change AI provider first (free from aistudio.google.com).");
     const parts = [{ text: prompt }].concat(images.map((im) => ({ inline_data: { mime_type: im.mime, data: im.b64 } })));
-    for (let attempt = 0; attempt < 2; attempt++) {
+    const waits = [5, 15, 30]; let busyTries = 0; let switched = false;
+    for (;;) {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.geminiModel)}:generateContent`, {
         method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": settings.geminiKey },
         body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0.1, responseMimeType: "application/json" } }),
@@ -495,12 +496,21 @@ async function askAI(prompt, images, purpose) {
       const msg = (data.error && data.error.message) || String(res.status);
       // Google retires models: if the error names a replacement, switch to it once and remember it.
       const next = (msg.match(/use (?:models\/)?(gemini-[\w.-]+)/i) || [])[1];
-      if (attempt === 0 && next && next !== settings.geminiModel && /no longer available|deprecated|not found|retired/i.test(msg)) {
+      if (!switched && next && next !== settings.geminiModel && /no longer available|deprecated|not found|retired/i.test(msg)) {
+        switched = true;
         settings.geminiModel = next.replace(/[.,;]+$/, ""); store("nashflow.settings", settings); renderProviderPill();
         toast("Switched to " + settings.geminiModel);
         continue;
       }
-      throw new Error(res.status === 429 ? "Gemini free tier limit reached. Wait a minute and run again." : "Gemini said: " + msg);
+      // Busy or rate limited: wait and try again a few times before giving up.
+      const busy = [429, 500, 503].includes(res.status) || /high demand|overloaded|try again|unavailable|rate limit|quota/i.test(msg);
+      if (busy && busyTries < waits.length) {
+        const w = waits[busyTries++];
+        toast(`Google is busy. Trying again in ${w} seconds (${busyTries} of ${waits.length})`);
+        await new Promise((r) => setTimeout(r, w * 1000));
+        continue;
+      }
+      throw new Error(busy ? "Google's free tier is still busy after several tries. Wait a few minutes and click Run the agents again." : "Gemini said: " + msg);
     }
   }
   if (p === "claude-api") {
