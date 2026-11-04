@@ -99,10 +99,10 @@ function renderCaseView(c) {
   const sub = [broker ? "From " + broker : "Uploaded", "received " + dateOf(c.createdAt) + " " + timeOf(c.createdAt), ready ? (miss || mism ? [miss ? miss + " missing" : "", mism ? mism + " mismatch" : ""].filter(Boolean).join(", ") : "complete and consistent") : "agents reading", "policy: illustrative UK market standard"].join(" · ");
   const rb = ready ? String(usable(c, "repayment_basis") || "").toLowerCase() : "";
   const recTone = c.rec && c.memo ? { approve: "green", decline: "red", more: "amber", escalate: "blue" }[c.rec.kind] : "";
-  const tabs = [["memo", "Credit memo"], ["source", "Source check", toCheck ? `<span class="chip c-amber">${toCheck} to check</span>` : ""], ["policy", "Policy checks", flags ? `<span class="chip c-amber">${flags} flag${flags > 1 ? "s" : ""}</span>` : ""], ["decision", "Decision"], ["audit", "Audit"]];
+  const tabs = [["memo", "Credit memo"], ["source", "Source check", toCheck ? `<span class="chip c-amber">${toCheck} to check</span>` : ""], ["fin", "Financials", c.financials && c.financials.flags.length ? `<span class="chip c-amber">${c.financials.flags.length} flag${c.financials.flags.length > 1 ? "s" : ""}</span>` : ""], ["policy", "Policy checks", flags ? `<span class="chip c-amber">${flags} flag${flags > 1 ? "s" : ""}</span>` : ""], ["decision", "Decision"], ["audit", "Audit"]];
   let body;
   if (!ready && currentTab !== "audit") body = renderWorking(c);
-  else body = { memo: renderMemoTab, source: renderSource, policy: renderPolicyTab, decision: renderDecision, audit: renderAudit }[currentTab](c);
+  else body = { memo: renderMemoTab, source: renderSource, fin: renderFinancials, policy: renderPolicyTab, decision: renderDecision, audit: renderAudit }[currentTab](c);
   return pageHead("Case management", "Case management") + `
   <div class="casecard">
     <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${c.memo && waitingOn(c) === currentRole ? `<span class="chip c-red">Your action</span>` : ""}<span style="flex:1"></span><button class="btn small" type="button" data-act="delete-case">Delete case</button></div>
@@ -269,6 +269,27 @@ function renderSource(c) {
   return `<p class="intro">Check the agents' work. Pick any field to see the document it came from, with the text highlighted, and every other document that mentions it. Corrections are audited and the checks recalculate.</p>
     <div class="grid2 even"><div class="stack"><div class="fieldlist">${list}</div>${tenants}</div><div>${detail}</div></div>`;
 }
+function renderFinancials(c) {
+  const f = c.financials;
+  if (!f) return `<div class="card"><h2>Financial analysis</h2><p class="hint">${c.run && c.run.running ? "The financial analysis agent is working." : "No financial spread for this case. Run all agents again to create one."}</p></div>`;
+  const cell = (x) => (x == null ? '<span class="note">-</span>' : money(x));
+  const spread = FIN_LINES.filter(([k]) => f.lines[k]).map(([k, label]) => `<tr><td><b>${esc(label)}</b></td>${f.periods.map((_, i) => `<td class="num">${cell(f.lines[k].values[i])}</td>`).join("")}<td>${f.lines[k].source && f.lines[k].source.doc ? refChip(f.lines[k].source.doc, f.lines[k].source.page, f.lines[k].source.quote) : ""}</td></tr>`).join("");
+  const head = `<tr><th></th>${f.periods.map((p) => `<th class="num">${esc(p.label)}${p.end ? `<br><span class="note">${esc(p.end)}</span>` : ""}</th>`).join("")}<th>Source</th></tr>`;
+  const ratios = f.ratios.map((r) => `<tr><td><b>${esc(r.label)}</b></td>${f.periods.map((_, i) => `<td class="num">${esc(r.values[i])}</td>`).join("")}<td><span class="chip c-blue">Calculated</span></td></tr>`).join("");
+  const flags = f.flags.length ? `<ul class="ready">${f.flags.map((x) => `<li class="${x.flag === "red" ? "todo" : "todo"}">${esc(x.text)}</li>`).join("")}</ul>` : `<p class="hint">No flags from the accounts.</p>`;
+  const g = f.guarantors.length ? `<div class="tablewrap bare"><table class="t"><thead><tr><th>Guarantor</th><th class="num">Assets</th><th class="num">Liabilities</th><th class="num">Net worth</th><th class="num">Liquid</th><th>Source</th></tr></thead><tbody>${f.guarantors.map((x) => `<tr><td><b>${esc(x.name)}</b></td><td class="num">${cell(x.assets)}</td><td class="num">${cell(x.liabilities)}</td><td class="num">${cell(x.net_worth)}</td><td class="num">${cell(x.liquid)}</td><td>${x.source && x.source.doc ? refChip(x.source.doc, x.source.page, x.source.quote) : ""}</td></tr>`).join("")}</tbody></table></div>` : `<p class="hint">No guarantor statement of assets and liabilities in the pack.</p>`;
+  const obs = f.observations.length ? `<ul class="obs">${f.observations.map((o) => `<li>${esc(o.text)} ${o.source && o.source.doc ? refChip(o.source.doc, o.source.page, o.source.quote || "") : ""}</li>`).join("")}</ul>` : "";
+  return `<p class="intro">Spread by the financial analysis agent from the accounts${f.entity ? ` of ${esc(f.entity)}` : ""}${f.basis ? ` (${esc(f.basis.toLowerCase())})` : ""}. Ratios are calculated in code from the spread, not by the AI. Red tags open the page each figure came from.</p>
+    <div class="grid2"><div class="stack">
+      <div class="card"><h2>Accounts spread</h2><div class="tablewrap bare"><table class="t"><thead>${head}</thead><tbody>${spread || `<tr><td colspan="${f.periods.length + 2}" class="note">No figures found.</td></tr>`}</tbody></table></div></div>
+      <div class="card"><h2>Ratios</h2><div class="tablewrap bare"><table class="t"><thead>${head}</thead><tbody>${ratios}</tbody></table></div></div>
+      <div class="card"><h2>Guarantors</h2>${g}</div>
+    </div><div class="stack">
+      <div class="card"><h2>Flags</h2>${flags}</div>
+      ${obs ? `<div class="card"><h2>What the agent noticed</h2>${obs}</div>` : ""}
+      ${f.missing.length ? `<div class="card"><h2>Still needed</h2><ul class="obs">${f.missing.map((m) => `<li>${esc(m)}</li>`).join("")}</ul></div>` : ""}
+    </div></div>`;
+}
 function renderPolicyTab(c) {
   const flagCards = [];
   c.consistency.forEach((x) => flagCards.push({ tone: "amber", label: "Amber", title: "Mismatch: " + (FIELD[x.key] ? FIELD[x.key].label : "Rent"), text: x.text, refs: (x.cands || []).filter((k) => k.doc) }));
@@ -398,6 +419,7 @@ function renderAgentsAdmin() {
     ["Intake agent", "Reads each uploaded document: PDF text, Word, Excel, emails and scanned images.", "In the browser"],
     ["Extraction agent", "Classifies each document and extracts the application fields with the document, page and exact text, using four states.", PROVIDERS[p].name],
     ["Policy agent", "Calculates loan size, term, LTV, ICR, DSCR, location, EPC, WAULT, concentration and document age, and suggests a recommendation.", "Code, no AI"],
+    ["Financial analysis agent", "Spreads up to three years of accounts and the guarantors' statements of assets and liabilities, with sources. Ratios are then calculated in code.", PROVIDERS[p].name],
     ["Memo agent", "Assesses the judgement areas, drafts the credit memo with sources and drafts a request to the broker.", PROVIDERS[p].name],
     ["Conditions agent", `Runs when the RM submits a case. Suggests conditions from the lender's base set of ${BASE_CONDITIONS.length} and adds case-specific ones. The Underwriter accepts or rejects each.`, PROVIDERS[p].name],
   ];

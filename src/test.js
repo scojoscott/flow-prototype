@@ -66,6 +66,15 @@ const memo = {
   broker_request: "Hi Ravi,\n\nThanks for sending Hulme Parade through. Before we go further, could you help with:\n- The rent: your email says £186,000 but the tenancy schedule shows £158,000\n- The position on Unit 6, which is holding over\n\nThanks,\n[Your name]",
 };
 
+const financials = { entity: "Redmere Estates Ltd", basis: "Summary", periods: [{ label: "FY2026", end: "2026-06-30" }, { label: "FY2025", end: "2025-06-30" }],
+  lines: [
+    { key: "rental_income", values: [171200, 183900], source: { doc: "D2", page: 1, quote: "Rental income" } },
+    { key: "property_costs", values: [22400, 19800], source: { doc: "D2", page: 1, quote: "Property costs" } },
+    { key: "finance_costs", values: [96300, 94100], source: { doc: "D2", page: 1, quote: "Finance costs" } },
+    { key: "profit_before_tax", values: [52500, 70000], source: { doc: "D2", page: 1, quote: "Profit before tax" } },
+    { key: "net_assets", values: [1104000, 1061000], source: { doc: "D2", page: 1, quote: "Net assets" } },
+  ],
+  guarantors: [], observations: [{ text: "Rental income fell from £183,900 to £171,200.", source: { doc: "D2", page: 1 } }], missing: ["Balance sheet detail, including bank debt", "Guarantor statements of assets and liabilities"] };
 const conditions = { conditions: [
   { type: "Condition precedent", text: "First legal charge over 1 to 7 Hulme Parade", from: "B1", reason: "Standard security" },
   { type: "Condition precedent", text: "Personal guarantees from Joanne and Patrick Redmond", from: "B9", reason: "Directors offered guarantees" },
@@ -83,7 +92,7 @@ const conditions = { conditions: [
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   let prompts = [];
-  await page.exposeFunction("__mockAI", (purpose) => (purpose === "extract" ? extraction : purpose === "conditions" ? conditions : memo));
+  await page.exposeFunction("__mockAI", (purpose) => (purpose === "extract" ? extraction : purpose === "conditions" ? conditions : purpose === "financials" ? financials : memo));
   await page.exposeFunction("__logPrompt", (p) => { prompts.push(p); });
   await page.addInitScript(() => { window.__testAI = async (prompt, images, purpose) => { await window.__logPrompt(prompt.slice(0, 200000)); await new Promise((r) => setTimeout(r, 400)); return window.__mockAI(purpose); }; });
   await page.goto("file://" + path.join(__dirname, "../index.html"));
@@ -111,6 +120,9 @@ const conditions = { conditions: [
   await page.screenshot({ path: OUT + "/3c-panel-pdf.png" });
   await page.keyboard.press("Escape");
   await page.click('button[data-tab="source"]');
+  await page.click('button[data-tab="fin"]');
+  console.log("Financials rows:", await page.locator("#main table.t tbody tr").count(), "flags:", await page.locator("#main .ready li").count());
+  await page.screenshot({ path: OUT + "/3d-financials.png", fullPage: true });
   await page.click('button[data-tab="policy"]');
   await page.screenshot({ path: OUT + "/4-policy.png", fullPage: true });
   await page.click('button[data-tab="decision"]');

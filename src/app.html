@@ -697,7 +697,7 @@ ${JUDGEMENT_AREAS.map((j) => `   - ${j.area}: ${j.rule}`).join("\n")}
    - property: location and micro-location, type and specification, age and condition, tenure, EPC and MEES implications, alternative uses, and how liquid the asset is as security.
    - valuation: valuer, date and basis, market value, capital value per sq ft, passing rent against ERV and the reversion, yield (the valuer's if given, otherwise the calculated implied yield), comparables if given and whether the value looks supported, the valuer's view on suitability, and reliance points (age of the valuation, who instructed it, need for a lender-instructed RICS valuation).
    - income: one "- " line per tenant (tenant, rent and share of total, lease end and break, covenant comment from evidence only), then WAULT to expiry and to break, rent at risk from lease events within the loan term, concentration, vacancy, arrears and reversion potential.
-   - financial_analysis: LTV, ICR at the pay rate and under stress, DSCR if amortising, debt yield and the sensitivities, with headroom against policy, and what the accounts show. One or two paragraphs, then "- " lines for each red or amber flag with the reason.
+   - financial_analysis: LTV, ICR at the pay rate and under stress, DSCR if amortising, debt yield and the sensitivities, with headroom against policy, and what the accounts show using the FINANCIAL SPREAD (income and profit trend, interest cover from the accounts, gearing, cash, guarantor net worth; mark its ratios as (calculated)). One or two paragraphs, then "- " lines for each red or amber flag with the reason.
    - exit: how the loan is repaid at maturity (refinance or sale), whether the asset should be refinanceable then given lease events before maturity and the LTV and ICR at maturity, and what could stop it.
    - risks: 5 to 8 "- Risk: ... Mitigant: ..." lines, most important first, specific to this deal.
    - covenants: proposed financial covenants using the SENSITIVITIES (LTV and ICR levels with headroom), then information undertakings (annual accounts, quarterly rent roll, lender's right to revalue). Say the levels are proposed.
@@ -720,6 +720,9 @@ ${JSON.stringify(checks, null, 1)}
 
 SENSITIVITIES (calculated)
 ${JSON.stringify(sens, null, 1)}
+
+FINANCIAL SPREAD (from the financial analysis agent; ratios calculated in code)
+${finBlock(c)}
 
 CONSISTENCY FLAGS
 ${JSON.stringify(c.consistency.map((f) => f.text))}
@@ -1027,6 +1030,74 @@ async function runConditions(c) {
   save(); render();
 }
 
+/* ------------------------------------------------------------------ financial analysis agent */
+const FIN_LINES = [
+  ["rental_income", "Rental income / turnover"], ["property_costs", "Property costs"], ["admin_costs", "Administrative costs"],
+  ["operating_profit", "Operating profit"], ["finance_costs", "Finance costs"], ["profit_before_tax", "Profit before tax"], ["profit_after_tax", "Profit after tax"],
+  ["investment_property", "Investment property"], ["cash", "Cash"], ["bank_debt", "Bank and other loans"], ["directors_loans", "Directors' loans"], ["net_assets", "Net assets"],
+];
+function finPrompt(c) {
+  const fin = c.docs.filter((d) => /accounts|sponsor|companies house|other/i.test(d.type || ""));
+  const docs = fin.length ? fin : c.docs;
+  const block = docs.map((d) => `=== DOCUMENT ${d.id}: "${d.name}" (${d.type || "unclassified"}) ===\n` + d.pages.map((p, i) => `--- ${d.id} page ${i + 1} ---\n${p}`).join("\n")).join("\n\n");
+  return `You are the financial analysis agent in NashFlow, a commercial property lending tool for a UK specialist lender. Spread the borrower's accounts and summarise the guarantors' statements of assets and liabilities, so a credit analyst can see the financial position. Ratios are calculated in code afterwards, so only extract figures.
+
+Rules:
+- Use only figures in the documents. Never estimate a missing figure: use null.
+- Periods: up to three years, most recent first, as shown in the accounts.
+- Give costs and finance costs as positive numbers. Numbers in pounds with no symbols or commas. Brackets mean negative in accounts, but report costs as positive.
+- For each line give the source (document id, page, and 3 to 12 words copied exactly so it can be highlighted).
+- Lines to extract where shown: ${FIN_LINES.map((l) => l[0] + " (" + l[1] + ")").join(", ")}.
+- Guarantors: for each director or guarantor with a statement of assets and liabilities, give total assets, total liabilities, net worth and liquid assets (cash and listed investments) if shown.
+- observations: 3 to 6 short points an analyst would note from the accounts (trend in income, profit, gearing, cash, related party loans, anything unusual), each with a source.
+- missing: what an analyst would still need (for example full accounts, management accounts for the current year, a bank statement, a guarantor statement).
+
+Reply with only this JSON:
+{"entity": "", "basis": "Full accounts | Abridged accounts | Management accounts | Summary", "periods": [{"label": "FY2026", "end": "YYYY-MM-DD"}],
+ "lines": [{"key": "rental_income", "values": [0, 0], "source": {"doc": "D2", "page": 1, "quote": "exact words"}}],
+ "guarantors": [{"name": "", "assets": 0, "liabilities": 0, "net_worth": 0, "liquid_assets": null, "source": {"doc": "D5", "page": 1, "quote": "exact words"}}],
+ "observations": [{"text": "", "source": {"doc": "D2", "page": 1}}],
+ "missing": [""]}
+
+DOCUMENTS
+${block}`;
+}
+function computeFinancials(c, r) {
+  const periods = (r.periods || []).slice(0, 3).map((p) => ({ label: String(p.label || p.end || ""), end: p.end || null }));
+  const n = periods.length;
+  const lines = {};
+  (r.lines || []).forEach((l) => { if (!l || !FIN_LINES.some((x) => x[0] === l.key)) return; lines[l.key] = { values: Array.from({ length: n }, (_, i) => parseNum((l.values || [])[i])), source: l.source || null }; });
+  const v = (k, i) => (lines[k] ? lines[k].values[i] : null);
+  const ratios = []; const flags = [];
+  const pct = (x) => (x == null || !isFinite(x) ? "-" : (x * 100).toFixed(1) + "%");
+  const per = (fn) => periods.map((_, i) => { try { const x = fn(i); return x == null || !isFinite(x) ? null : x; } catch (e) { return null; } });
+  const growth = per((i) => (i + 1 < n && v("rental_income", i) != null && v("rental_income", i + 1) ? v("rental_income", i) / v("rental_income", i + 1) - 1 : null));
+  ratios.push({ label: "Income growth on prior year", values: growth.map(pct) });
+  const margin = per((i) => (v("profit_before_tax", i) != null && v("rental_income", i) ? v("profit_before_tax", i) / v("rental_income", i) : null));
+  ratios.push({ label: "Profit before tax margin", values: margin.map(pct) });
+  const icr = per((i) => (v("finance_costs", i) ? ((v("operating_profit", i) != null ? v("operating_profit", i) : v("profit_before_tax", i) != null ? v("profit_before_tax", i) + v("finance_costs", i) : null)) / v("finance_costs", i) : null));
+  ratios.push({ label: "Interest cover from the accounts", values: icr.map((x) => (x == null ? "-" : x.toFixed(2) + "x")) });
+  const gear = per((i) => (v("net_assets", i) && v("bank_debt", i) != null ? v("bank_debt", i) / v("net_assets", i) : null));
+  ratios.push({ label: "Gearing (loans to net assets)", values: gear.map(pct) });
+  const ltvBook = per((i) => (v("investment_property", i) && v("bank_debt", i) != null ? v("bank_debt", i) / v("investment_property", i) : null));
+  ratios.push({ label: "Loans to book value of property", values: ltvBook.map(pct) });
+  if (growth[0] != null && growth[0] < -0.05) flags.push({ flag: "amber", text: `Income fell ${pct(-growth[0])} on the prior year (calculated).` });
+  if (margin[0] != null && margin[0] < 0) flags.push({ flag: "red", text: "Loss before tax in the latest year (calculated)." });
+  if (icr[0] != null && icr[0] < POLICY.minICR) flags.push({ flag: "amber", text: `Interest cover from the accounts is ${icr[0].toFixed(2)}x, below the ${POLICY.minICR}x policy minimum (calculated).` });
+  if (v("net_assets", 0) != null && v("net_assets", 0) < 0) flags.push({ flag: "red", text: "Negative net assets in the latest year." });
+  if (gear[0] != null && gear[0] > 1.5) flags.push({ flag: "amber", text: `Gearing of ${pct(gear[0])} in the latest year (calculated).` });
+  if (!n) flags.push({ flag: "amber", text: "No accounts figures found in the pack." });
+  const guarantors = (r.guarantors || []).filter((g) => g && g.name).map((g) => { const a = parseNum(g.assets), l = parseNum(g.liabilities); return { name: g.name, assets: a, liabilities: l, net_worth: parseNum(g.net_worth) ?? (a != null && l != null ? a - l : null), liquid: parseNum(g.liquid_assets), source: g.source || null }; });
+  c.financials = { entity: r.entity || "", basis: r.basis || "", periods, lines, ratios, flags, guarantors, observations: (r.observations || []).filter((o) => o && o.text), missing: (r.missing || []).filter(Boolean), at: nowISO() };
+}
+function finBlock(c) {
+  const f = c.financials; if (!f) return "Not available.";
+  const rows = FIN_LINES.filter(([k]) => f.lines[k]).map(([k, label]) => `- ${label}: ${f.periods.map((p, i) => `${p.label} ${f.lines[k].values[i] == null ? "n/a" : money(f.lines[k].values[i])}`).join(", ")}${f.lines[k].source ? ` [${f.lines[k].source.doc} p${f.lines[k].source.page || 1}]` : ""}`);
+  const rat = f.ratios.map((r) => `- ${r.label} (calculated): ${f.periods.map((p, i) => `${p.label} ${r.values[i]}`).join(", ")}`);
+  const g = f.guarantors.map((x) => `- ${x.name}: assets ${money(x.assets)}, liabilities ${money(x.liabilities)}, net worth ${money(x.net_worth)}${x.liquid != null ? ", liquid " + money(x.liquid) : ""}${x.source ? ` [${x.source.doc} p${x.source.page || 1}]` : ""}`);
+  return [`Entity: ${f.entity}. Basis: ${f.basis}.`, ...rows, ...rat, ...(g.length ? ["Guarantors:", ...g] : []), ...(f.flags.length ? ["Flags:", ...f.flags.map((x) => "- " + x.text)] : [])].join("\n");
+}
+
 /* ------------------------------------------------------------------ the agent run */
 async function runAgents(c, onlyMemo = false) {
   const imgs = memImages[c.id] || [];
@@ -1034,6 +1105,7 @@ async function runAgents(c, onlyMemo = false) {
     { id: "intake", agent: "Intake agent", text: `Read ${c.docs.length} document${c.docs.length === 1 ? "" : "s"}`, state: "done" },
     { id: "extract", agent: "Extraction agent", text: "Classify documents and extract fields with sources", state: onlyMemo ? "done" : "todo" },
     { id: "policy", agent: "Policy agent", text: "Run calculated checks against the credit policy", state: onlyMemo ? "done" : "todo" },
+    { id: "fin", agent: "Financial analysis agent", text: "Spread the accounts and guarantor statements", state: onlyMemo ? "done" : "todo" },
     { id: "memo", agent: "Memo agent", text: "Assess judgement areas and draft the credit memo", state: "todo" },
   ];
   c.run = { steps, error: null, running: true };
@@ -1057,6 +1129,17 @@ async function runAgents(c, onlyMemo = false) {
       computeRecommendation(c);
       set("policy", "done", `${c.checks.filter((k) => k.outcome === "Pass").length} pass, ${c.checks.filter((k) => k.outcome === "Fail").length} fail, ${c.checks.filter((k) => k.outcome === "Unclear").length} unclear`);
       audit(c, "Policy agent", `Ran ${c.checks.length} calculated checks against ${POLICY.name}`, "agent");
+      set("fin", "active");
+      try {
+        const fr = await askAI(finPrompt(c), [], "financials");
+        computeFinancials(c, fr);
+        set("fin", "done", `${c.financials.periods.length} year${c.financials.periods.length === 1 ? "" : "s"} spread, ${c.financials.guarantors.length} guarantor statement${c.financials.guarantors.length === 1 ? "" : "s"}, ${c.financials.flags.length} flag${c.financials.flags.length === 1 ? "" : "s"}`);
+        audit(c, "Financial analysis agent", `Spread ${c.financials.periods.length} years of accounts and ${c.financials.guarantors.length} guarantor statements; ratios calculated in code`, "agent");
+      } catch (e) {
+        c.financials = null;
+        set("fin", "error", "Skipped: " + (e.message || e));
+        audit(c, "Financial analysis agent", "Stopped, the memo continues without the spread: " + (e.message || e), "agent");
+      }
     }
     set("memo", "active");
     const m = await askAI(memoPrompt(c), [], "memo");
