@@ -398,7 +398,9 @@ const PROVIDERS = {
   "claude-api": { name: "Claude API", desc: "Anthropic API key. Works in the downloaded copy." },
   "azure": { name: "Azure OpenAI", desc: "Your Azure OpenAI resource, for example NashTech's own. Works in the downloaded copy." },
 };
-let settings = Object.assign({ provider: "auto", geminiKey: "", geminiModel: "gemini-2.5-flash", claudeKey: "", claudeModel: "claude-sonnet-5-5", azureEndpoint: "", azureDeployment: "", azureKey: "", azureVersion: "2024-10-21" }, load("nashflow.settings", {}));
+const GEMINI_DEFAULT = "gemini-3.8-flash";
+let settings = Object.assign({ provider: "auto", geminiKey: "", geminiModel: GEMINI_DEFAULT, claudeKey: "", claudeModel: "claude-sonnet-5-5", azureEndpoint: "", azureDeployment: "", azureKey: "", azureVersion: "2024-10-21" }, load("nashflow.settings", {}));
+if (/^gemini-(1|2)\./.test(settings.geminiModel || "")) { settings.geminiModel = GEMINI_DEFAULT; store("nashflow.settings", settings); }
 let sampleFn = null;
 let sampleChecked = false;
 (async () => {
@@ -443,16 +445,28 @@ async function askAI(prompt, images, purpose) {
     }
   }
   if (p === "gemini") {
-    if (!settings.geminiKey) throw new Error("Add your Gemini key in Settings first (free from aistudio.google.com).");
+    if (!settings.geminiKey) throw new Error("Add your Gemini key in Change AI provider first (free from aistudio.google.com).");
     const parts = [{ text: prompt }].concat(images.map((im) => ({ inline_data: { mime_type: im.mime, data: im.b64 } })));
-    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.geminiModel)}:generateContent`, {
-      method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": settings.geminiKey },
-      body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0.1, responseMimeType: "application/json" } }),
-    }).catch(() => { throw new Error("Could not reach Google. Gemini works in the downloaded copy of this page, not inside the NashFlow link."); });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error(res.status === 429 ? "Gemini free tier limit reached. Wait a minute and run again." : "Gemini said: " + ((data.error && data.error.message) || res.status));
-    const text = (data.candidates?.[0]?.content?.parts || []).map((x) => x.text || "").join("");
-    return parseJSONLoose(text);
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.geminiModel)}:generateContent`, {
+        method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": settings.geminiKey },
+        body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0.1, responseMimeType: "application/json" } }),
+      }).catch(() => { throw new Error("Could not reach Google. Check your internet connection. Inside the claude.ai link Gemini cannot be used; choose Claude (built in) there."); });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok) {
+        const text = (data.candidates?.[0]?.content?.parts || []).map((x) => x.text || "").join("");
+        return parseJSONLoose(text);
+      }
+      const msg = (data.error && data.error.message) || String(res.status);
+      // Google retires models: if the error names a replacement, switch to it once and remember it.
+      const next = (msg.match(/use (?:models\/)?(gemini-[\w.-]+)/i) || [])[1];
+      if (attempt === 0 && next && next !== settings.geminiModel && /no longer available|deprecated|not found|retired/i.test(msg)) {
+        settings.geminiModel = next.replace(/[.,;]+$/, ""); store("nashflow.settings", settings); renderProviderPill();
+        toast("Switched to " + settings.geminiModel);
+        continue;
+      }
+      throw new Error(res.status === 429 ? "Gemini free tier limit reached. Wait a minute and run again." : "Gemini said: " + msg);
+    }
   }
   if (p === "claude-api") {
     if (!settings.claudeKey) throw new Error("Add your Claude API key in Settings first.");

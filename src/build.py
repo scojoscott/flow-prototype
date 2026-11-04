@@ -44,6 +44,6 @@ assert "—" not in out, "em dash found"
 open(os.path.join(H, "nashflow-deal-processor.html"), "w").write(out)
 # Hosted copy for GitHub Pages: a full HTML document at the repo root
 page = ('<!doctype html>\n<html lang="en">\n<head>\n<meta charset="utf-8">\n'
-        '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">\n</head>\n<body>\n' + out + '\n</body>\n</html>\n')
+        '<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">\n<meta name="robots" content="noindex, nofollow">\n</head>\n<body>\n' + out + '\n</body>\n</html>\n')
 open(os.path.join(H, "..", "index.html"), "w").write(page)
 print(len(out))
