@@ -253,6 +253,23 @@ textarea.ed { width: 100%; min-height: 150px; border: 1px solid var(--line); bor
 .audit .who.agent { color: var(--info); }
 @media (max-width: 600px) { .audit li { grid-template-columns: 50px minmax(0, 1fr); } .audit li .what { grid-column: 1 / -1; } }
 
+
+/* Source panel on the right */
+.modal.drawer { inset: 0 0 0 auto; width: min(640px, 100%); background: none; display: block; padding: 0; z-index: 25; }
+.drawer .dialog { width: 100%; height: 100%; max-height: none; border-radius: 0; box-shadow: -10px 0 34px rgba(0,0,0,.18); border-left: 1px solid var(--line); align-content: start; padding: 18px max(18px, env(safe-area-inset-right, 0px)) 18px 18px; }
+.drawer header .grow { flex: 1; min-width: 0; }
+.drawer header h2 { overflow-wrap: anywhere; }
+@media (min-width: 1760px) { body.src-open .app { margin-right: 640px; } }
+.pdfscroll { max-height: 72vh; overflow: auto; background: var(--surface); }
+.drawer .pdfscroll { max-height: calc(100vh - 190px); }
+.pdfslot.img { padding: 10px; }
+.pdfpage { position: relative; width: 100%; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.18); }
+.pdfpage img { width: 100%; height: 100%; display: block; }
+.hlbox { position: absolute; background: rgba(255, 200, 0, .38); outline: 2px solid #D6001C; border-radius: 2px; mix-blend-mode: multiply; }
+.qnote { margin: 0; padding: 7px 12px; font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--line); background: var(--bg); }
+.pagetext.paper { font-family: inherit; font-size: 13px; line-height: 1.6; background: #fff; color: #1a1a1a; margin: 10px; padding: 22px 26px; box-shadow: 0 1px 6px rgba(0,0,0,.18); max-height: none; }
+.readtext summary { cursor: pointer; font-size: 12.5px; font-weight: 700; padding: 4px 0; }
+
 /* Modals */
 .modal { position: fixed; inset: 0; z-index: 20; background: rgba(15, 16, 20, .45); display: grid; place-items: center;
   padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
@@ -281,9 +298,9 @@ textarea.ed { width: 100%; min-height: 150px; border: 1px solid var(--line); bor
 </div>
 <input type="file" id="fileInput" multiple hidden accept=".pdf,.txt,.eml,.md,.csv,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.webp">
 
-<div class="modal" id="sourceModal" hidden>
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="srcTitle">
-    <header><h2 id="srcTitle">Source</h2><button class="btn small" type="button" data-close>Close</button></header>
+<div class="modal drawer" id="sourceModal" hidden>
+  <div class="dialog" role="complementary" aria-labelledby="srcTitle">
+    <header><div class="grow"><div class="label">Source document</div><h2 id="srcTitle">Source</h2></div><button class="btn small" type="button" data-close>Close</button></header>
     <div id="srcBody"></div>
   </div>
 </div>

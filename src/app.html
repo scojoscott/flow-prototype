@@ -536,6 +536,7 @@ async function readFile(file) {
   const name = file.name; const lower = name.toLowerCase();
   const doc = { name, pages: [], images: [] };
   if (lower.endsWith(".pdf") || file.type === "application/pdf") {
+    doc.kind = "pdf";
     const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
@@ -551,21 +552,43 @@ async function readFile(file) {
       }
     }
   } else if (lower.endsWith(".docx")) {
+    doc.kind = "word";
     await loadScript("https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js");
     const r = await window.mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
     doc.pages.push(r.value.trim());
   } else if (/\.(xlsx|xls)$/.test(lower)) {
     await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+    doc.kind = "sheet";
     const wb = window.XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
     wb.SheetNames.forEach((sn) => doc.pages.push("Sheet: " + sn + "\n" + window.XLSX.utils.sheet_to_csv(wb.Sheets[sn])));
   } else if (/\.(png|jpe?g|webp)$/.test(lower) || (file.type || "").startsWith("image/")) {
     const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1]); fr.readAsDataURL(file); });
+    doc.kind = "image";
     doc.images.push({ page: 1, mime: file.type || "image/jpeg", b64 });
     doc.pages.push("[Image. Read from the image.]");
   } else {
     doc.pages.push((await file.text()).trim());
   }
   return doc;
+}
+
+
+/* ------------------------------------------------------------------ original files (IndexedDB, this browser only) */
+const fileStore = (() => {
+  let dbp = null;
+  const db = () => dbp || (dbp = new Promise((res, rej) => { try { const r = indexedDB.open("nashflow.files", 1); r.onupgradeneeded = () => r.result.createObjectStore("files"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }));
+  const tx = async (mode, fn) => { const d = await db(); return new Promise((res, rej) => { const t = d.transaction("files", mode); const q = fn(t.objectStore("files")); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }); };
+  return {
+    put: (k, v) => tx("readwrite", (s) => s.put(v, k)).catch(() => null),
+    get: (k) => tx("readonly", (s) => s.get(k)).catch(() => null),
+    delCase: (caseId) => tx("readwrite", (s) => s.delete(IDBKeyRange.bound(caseId + "/", caseId + "/￿"))).catch(() => null),
+  };
+})();
+const pdfCache = {}; // "case/doc" -> pdf.js document promise
+function pdfFor(caseId, docId) {
+  const k = caseId + "/" + docId;
+  if (!pdfCache[k]) pdfCache[k] = fileStore.get(k).then((f) => (f && f.bytes ? window.pdfjsLib.getDocument({ data: new Uint8Array(f.bytes) }).promise : null)).catch(() => null);
+  return pdfCache[k];
 }
 
 /* ------------------------------------------------------------------ state */
@@ -591,6 +614,7 @@ async function newCaseFromFiles(files, title) {
     try {
       const d = await readFile(f);
       d.id = "D" + i;
+      if (d.kind === "pdf") await fileStore.put(c.id + "/" + d.id, { name: f.name, bytes: await f.arrayBuffer() });
       d.images.forEach((im) => memImages[c.id].push(Object.assign({ doc: d.id }, im)));
       d.imagePages = d.images.map((im) => im.page);
       delete d.images;
@@ -620,6 +644,7 @@ Rules:
 - If the same field appears in more than one document, put the other occurrences in "others", even when they agree. This is used to check consistency. Include the broker email's figures as well as the formal documents' figures.
 - annual_rent is the current passing rent actually payable, not estimated rental value of vacant space.
 - property_country is inferred from the address and postcode.
+- borrower_name and company_number are the legal borrowing company. If the broker email or application form does not give them, take them from the accounts (the company name and registered number on the cover, directors' report or balance sheet), or from a Companies House printout. Always list what the accounts say in "others" too, so they can be compared.
 - A broker's rough figure ("around", "about", "we think") is Not confident unless a formal document confirms it. value_basis is "Broker estimate" when there is no valuation report.
 - Classify each document as one of: Broker email, Application form, Valuation report, Tenancy schedule, Lease, Accounts, Sales particulars, Companies House, EPC certificate, Redemption statement, Sponsor statement, Other. Give its date if shown.
 - List every tenant from a tenancy schedule or lease with annual rent (number), lease_end and break_date (YYYY-MM-DD, or null with a note if not clear). Exclude vacant units.
@@ -714,7 +739,9 @@ function normaliseExtraction(c, r) {
       for (const t of pr) { const hit = cands.find((k) => k.docType === t); if (hit) { used = hit; break; } }
     }
     if (used && state === "Not present") state = "Found";
-    const field = { key: f.key, state, value: used ? (NUMERIC.has(f.key) ? used.num : used.value) : null, source: used && used.doc ? { doc: used.doc, page: used.page || 1, quote: used.quote || "" } : null, note: raw.note || "", candidates: cands };
+    const fromBroker = cands.some((k) => k.docType === "Broker email" || k.docType === "Application form");
+    const backfill = (f.key === "borrower_name" || f.key === "company_number") && used && !fromBroker && ["Accounts", "Companies House"].includes(used.docType);
+    const field = { key: f.key, state, value: used ? (NUMERIC.has(f.key) ? used.num : used.value) : null, source: used && used.doc ? { doc: used.doc, page: used.page || 1, quote: used.quote || "" } : null, note: backfill ? `Not in the broker's submission. Taken from the ${used.docType === "Accounts" ? "accounts" : "Companies House record"}.` : raw.note || "", backfilled: backfill ? used.docType : null, candidates: cands };
     if (NUMERIC.has(f.key) && used && used.num != null) {
       const tol = f.type === "money" ? 0.01 : 0;
       const diff = cands.filter((k) => k.num != null && Math.abs(k.num - used.num) > Math.abs(used.num) * tol + 1e-9);

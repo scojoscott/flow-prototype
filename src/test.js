@@ -20,7 +20,7 @@ const extraction = {
     owned_by_borrower: { state: "Found", value: "Yes", source: { doc: "D1", page: 1, quote: "Owned by the borrower since 2017" } },
     purchase_price: { state: "Not applicable", value: null, note: "Refinance" },
     borrower_name: { state: "Found", value: "Redmere Estates Ltd", source: { doc: "D1", page: 1, quote: "Borrower: Redmere Estates Ltd" }, others: [{ value: "Redmere Estates Ltd", doc: "D2", page: 1, quote: "Redmere Estates Ltd" }] },
-    company_number: { state: "Found", value: "11456209", source: { doc: "D1", page: 1, quote: "company number 11456209" } },
+    company_number: { state: "Found", value: "11456209", source: { doc: "D2", page: 1, quote: "Company number 11456209" } },
     registered_address: { state: "Found", value: "88 Wilmslow Road, Manchester M14 5TQ", source: { doc: "D1", page: 1, quote: "88 Wilmslow Road" } },
     directors: { state: "Found", value: "Joanne Redmond and Patrick Redmond", source: { doc: "D1", page: 1, quote: "Joanne Redmond and Patrick Redmond" } },
     experience: { state: "Found", value: "Over 15 years in Greater Manchester retail property", source: { doc: "D1", page: 1, quote: "for over 15 years" } },
@@ -87,7 +87,23 @@ const memo = {
   await page.waitForTimeout(500);
   await page.screenshot({ path: OUT + "/2-memo.png", fullPage: true });
   await page.click('button[data-tab="source"]');
-  await page.screenshot({ path: OUT + "/3-source.png", fullPage: true });
+  await page.waitForSelector("#main .pdfpage img", { timeout: 10000 });
+  console.log("Source tab page image:", await page.locator("#main .pdfpage img").count(), "highlights:", await page.locator("#main .hlbox").count());
+  await page.screenshot({ path: OUT + "/3-source.png" });
+  await page.click('button[data-field="company_number"]');
+  console.log("Company number line:", await page.locator('button[data-field="company_number"] .from').innerText(), "|", await page.locator(".card.sticky .hint").first().innerText());
+  await page.click('button[data-tab="memo"]');
+  await page.locator('.memo-body button.ref').first().click();
+  await page.waitForSelector("#srcBody .pdfpage img, #srcBody .pagetext.paper", { timeout: 10000 });
+  await page.waitForTimeout(400);
+  console.log("Panel open:", await page.locator("#sourceModal:not([hidden])").count(), "image:", await page.locator("#srcBody .pdfpage img").count(), "highlights:", await page.locator("#srcBody .hlbox").count());
+  await page.screenshot({ path: OUT + "/3b-panel.png" });
+  await page.evaluate(() => openSource("D2", 1, "Company number 11456209"));
+  await page.waitForSelector("#srcBody .pdfpage img", { timeout: 10000 });
+  console.log("PDF panel highlights:", await page.locator("#srcBody .hlbox").count());
+  await page.screenshot({ path: OUT + "/3c-panel-pdf.png" });
+  await page.keyboard.press("Escape");
+  await page.click('button[data-tab="source"]');
   await page.click('button[data-tab="policy"]');
   await page.screenshot({ path: OUT + "/4-policy.png", fullPage: true });
   await page.click('button[data-tab="decision"]');

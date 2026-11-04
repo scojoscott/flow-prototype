@@ -158,13 +158,75 @@ function highlight(text, quote) {
   }
   return { html, found };
 }
+function findQuote(text, quote) {
+  if (!quote) return null;
+  const words = quote.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  for (const n of [words.length, Math.min(5, words.length), Math.min(3, words.length)]) {
+    if (!n) break;
+    const m = new RegExp(words.slice(0, n).join("\\s+"), "i").exec(text);
+    if (m) return [m.index, m.index + m[0].length];
+  }
+  return null;
+}
+const pageImgCache = {};
+async function pdfPageImage(caseId, docId, page, quote) {
+  const key = [caseId, docId, page, quote || ""].join("|");
+  if (pageImgCache[key]) return pageImgCache[key];
+  const pdf = await pdfFor(caseId, docId);
+  if (!pdf) return null;
+  const pg = await pdf.getPage(page);
+  const vp = pg.getViewport({ scale: 2 });
+  const canvas = document.createElement("canvas"); canvas.width = Math.floor(vp.width); canvas.height = Math.floor(vp.height);
+  const ctx = canvas.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await pg.render({ canvasContext: ctx, viewport: vp }).promise;
+  const rects = [];
+  if (quote) {
+    const tc = await pg.getTextContent();
+    let txt = ""; const spans = [];
+    tc.items.forEach((it) => { if (typeof it.str !== "string") return; spans.push({ it, a: txt.length, b: txt.length + it.str.length }); txt += it.str + (it.hasEOL ? "\n" : " "); });
+    const hit = findQuote(txt, quote);
+    if (hit) spans.filter((sp) => sp.b > hit[0] && sp.a < hit[1] && sp.it.str.length).forEach((sp) => {
+      const tx = window.pdfjsLib.Util.transform(vp.transform, sp.it.transform);
+      const h = Math.hypot(tx[2], tx[3]); const w = sp.it.width * vp.scale; const n = sp.it.str.length;
+      const f0 = Math.max(0, hit[0] - sp.a) / n, f1 = Math.min(n, hit[1] - sp.a + 1) / n;
+      rects.push({ x: (tx[4] + w * f0) / vp.width, y: (tx[5] - h * 1.05) / vp.height, w: (w * (f1 - f0)) / vp.width, h: (h * 1.3) / vp.height });
+    });
+  }
+  const out = { url: canvas.toDataURL("image/jpeg", 0.88), ratio: vp.width / vp.height, rects };
+  pageImgCache[key] = out;
+  return out;
+}
+/* Swap each PDF page placeholder for an image of the real page, with the quote highlighted */
+function hydratePages(root) {
+  (root || document).querySelectorAll(".pdfslot[data-doc]:not([data-done])").forEach(async (el) => {
+    el.dataset.done = "1";
+    const c = cur(); if (!c || c.id !== el.dataset.case) return;
+    try {
+      const r = await pdfPageImage(el.dataset.case, el.dataset.doc, +el.dataset.page, el.dataset.quote);
+      if (!r || !el.isConnected) return;
+      el.innerHTML = `<div class="pdfpage" style="aspect-ratio:${r.ratio}"><img alt="${esc(el.dataset.name)} page ${esc(el.dataset.page)}" src="${r.url}">${r.rects.map((q) => `<span class="hlbox" style="left:${(q.x * 100).toFixed(2)}%;top:${(q.y * 100).toFixed(2)}%;width:${(q.w * 100).toFixed(2)}%;height:${(q.h * 100).toFixed(2)}%"></span>`).join("")}</div>`;
+      el.classList.add("img");
+      const note = el.parentElement && el.parentElement.querySelector(".qnote");
+      if (note && el.dataset.quote) note.innerHTML = r.rects.length ? `Highlighted on the page: "${esc(el.dataset.quote)}"` : `The agent quoted "${esc(el.dataset.quote)}", which is not word for word on this page.`;
+      const hl = el.querySelector(".hlbox");
+      if (hl) { const sc = el.closest(".pdfscroll"); if (sc) sc.scrollTop = Math.max(0, hl.offsetTop - sc.clientHeight / 3); }
+    } catch (e) { /* keep the text view */ }
+  });
+}
 function pageView(c, docId, page, quote) {
   const d = c.docs.find((x) => x.id === docId); if (!d) return `<p class="hint">Document not found.</p>`;
   page = Math.min(Math.max(1, +page || 1), d.pages.length);
   const img = (memImages[c.id] || []).find((im) => im.doc === docId && im.page === page);
   const h = highlight(d.pages[page - 1] || "", quote);
   const nav = d.pages.length > 1 ? d.pages.map((_, i) => `<button class="btn small ${i + 1 === page ? "primary" : ""}" type="button" data-pagesel="${i + 1}" data-doc="${d.id}">p.${i + 1}</button>`).join("") : "";
-  return `<div class="pagebox"><div class="ph"><span>${esc(d.name)}</span><span class="row">${nav || "Page 1 of 1"}</span></div>${img ? `<img class="pageimg" alt="${esc(d.name)} page ${page}" src="data:${img.mime};base64,${img.b64}">` : `<div class="pagetext">${h.html || "(No text on this page)"}</div>`}</div>${quote && !h.found && !img ? `<p class="note">The agent quoted "${esc(quote)}", which is not word for word on this page.</p>` : ""}`;
+  const kindLabel = { pdf: "PDF", word: "Word document", sheet: "Spreadsheet", image: "Image" }[d.kind] || "Text";
+  const textView = `<div class="pagetext ${d.kind === "sheet" ? "" : "paper"}">${h.html || "(No text on this page)"}</div>`;
+  let viewer;
+  if (d.kind === "pdf") viewer = `<div class="pdfslot" data-case="${esc(c.id)}" data-doc="${esc(d.id)}" data-page="${page}" data-quote="${esc(quote || "")}" data-name="${esc(d.name)}">${img ? `<img class="pageimg" alt="${esc(d.name)} page ${page}" src="data:${img.mime};base64,${img.b64}">` : textView}</div>`;
+  else if (img) viewer = `<img class="pageimg" alt="${esc(d.name)} page ${page}" src="data:${img.mime};base64,${img.b64}">`;
+  else viewer = textView;
+  const qnote = quote ? `<p class="qnote">${h.found ? `Highlighted: "${esc(quote)}"` : d.kind === "pdf" ? `Looking for "${esc(quote)}" on the page` : `The agent quoted "${esc(quote)}", which is not word for word on this page.`}</p>` : "";
+  return `<div class="pagebox"><div class="ph"><span>${esc(d.name)} <span class="note">· ${kindLabel} · page ${page} of ${d.pages.length}</span></span><span class="row">${nav}</span></div>${qnote}<div class="pdfscroll">${viewer}</div></div>`;
 }
 function pickField(c) {
   if (!c.fields) return "annual_rent";
@@ -182,14 +244,14 @@ function renderSource(c) {
     const more = (x.candidates || []).filter((k) => k.doc).length - 1;
     const d = x.source ? c.docs.find((y) => y.id === x.source.doc) : null;
     const chip = !x.edited && c.consistency.some((y) => y.key === f.key) ? `<span class="chip c-amber">Mismatch</span>` : x.edited ? `<span class="chip c-green">${x.edited.confirmed ? "Confirmed" : "Corrected"}</span>` : `<span class="chip ${stateClass(x.state)}">${esc(x.state)}</span>`;
-    list += `<button type="button" class="frow ${selectedField === f.key ? "sel" : ""}" data-field="${f.key}"><span class="k">${esc(f.label)}</span>${chip}<span class="v">${esc(val) || '<span class="note">Blank</span>'}</span>${x.source ? `<span class="from">From ${esc(d ? d.type || d.name : x.source.doc)} p.${esc(x.source.page)}${more > 0 ? ` + ${more} more` : ""}</span>` : x.note ? `<span class="note">${esc(x.note)}</span>` : ""}</button>`;
+    list += `<button type="button" class="frow ${selectedField === f.key ? "sel" : ""}" data-field="${f.key}"><span class="k">${esc(f.label)}</span>${chip}<span class="v">${esc(val) || '<span class="note">Blank</span>'}</span>${x.source ? `<span class="from">From ${esc(d ? d.type || d.name : x.source.doc)} p.${esc(x.source.page)}${more > 0 ? ` + ${more} more` : ""}${x.backfilled ? " (not given by the broker)" : ""}</span>` : x.note ? `<span class="note">${esc(x.note)}</span>` : ""}</button>`;
   });
   const f = FIELD[selectedField]; const x = c.fields[selectedField];
   const val = x.value == null || x.value === "" ? "Blank" : f.type === "money" ? money(x.value) : String(x.value);
   const cands = (x.candidates || []).filter((k) => k.doc);
   const flag = c.consistency.find((y) => y.key === selectedField);
   const showDoc = srcDocSel && srcDocSel.field === selectedField ? srcDocSel : x.source ? { doc: x.source.doc, page: x.source.page, quote: x.source.quote } : cands[0] ? { doc: cands[0].doc, page: cands[0].page, quote: cands[0].quote } : null;
-  const usedLine = x.edited ? `${x.edited.confirmed ? "Confirmed" : "Corrected"} by you at ${timeOf(x.edited.at)}${!x.edited.confirmed ? `. Was "${esc(x.edited.old ?? "blank")}".` : "."}` : flag ? esc(flag.text) : x.source && cands.length > 1 ? `Found in ${cands.length} places and they agree.` : x.source ? "Found in one document." : esc(x.note || "Not found in the pack.");
+  const usedLine = x.backfilled && !x.edited ? esc(x.note) : x.edited ? `${x.edited.confirmed ? "Confirmed" : "Corrected"} by you at ${timeOf(x.edited.at)}${!x.edited.confirmed ? `. Was "${esc(x.edited.old ?? "blank")}".` : "."}` : flag ? esc(flag.text) : x.source && cands.length > 1 ? `Found in ${cands.length} places and they agree.` : x.source ? "Found in one document." : esc(x.note || "Not found in the pack.");
   const detail = `<div class="card sticky">
     <div class="cardhead"><h2>${esc(f.label)}: ${esc(val)}</h2>${x.edited ? `<span class="chip c-green">${x.edited.confirmed ? "Confirmed" : "Corrected"}</span>` : flag ? `<span class="chip c-amber">Mismatch</span>` : `<span class="chip ${stateClass(x.state)}">${esc(x.state)}</span>`}</div>
     <p class="hint">${usedLine}</p>
@@ -305,6 +367,7 @@ function render() {
   if (view === "case" && !c) view = cases.length ? "cases" : "new";
   const html = { new: renderNew, cases: renderCases, policy: renderPolicyAdmin, agents: renderAgentsAdmin }[view];
   $("#main").innerHTML = view === "case" ? renderCaseView(c) : html();
+  hydratePages($("#main"));
 }
 
 /* ------------------------------------------------------------------ source pop-out (from memo and policy tags) */
@@ -313,11 +376,14 @@ function openSource(docId, page, quote) {
   const d = c.docs.find((x) => x.id === docId);
   if (!d) { toast("That document is not in this case"); return; }
   $("#srcTitle").textContent = `${d.type ? d.type + ": " : ""}${d.name}`;
-  $("#srcBody").innerHTML = pageView(c, docId, page, quote);
+  $("#srcBody").innerHTML = pageView(c, docId, page, quote) + (d.kind !== "pdf" ? "" : `<details class="readtext"><summary>Text the agent read from this page</summary><div class="pagetext">${highlight(d.pages[Math.min(Math.max(1, +page || 1), d.pages.length) - 1] || "", quote).html}</div></details>`);
   $("#srcBody").dataset.doc = docId;
   $("#sourceModal").hidden = false;
-  const m = $("#srcBody mark"); if (m) m.scrollIntoView({ block: "center" });
+  document.body.classList.add("src-open");
+  hydratePages($("#srcBody"));
+  const m = $("#srcBody .pdfscroll mark"); if (m) { const sc = m.closest(".pdfscroll"); sc.scrollTop = Math.max(0, m.offsetTop - sc.clientHeight / 3); }
 }
+function closeSource() { $("#sourceModal").hidden = true; document.body.classList.remove("src-open"); }
 
 /* ------------------------------------------------------------------ settings */
 function renderSettings() {
@@ -338,7 +404,7 @@ function renderSettings() {
 document.addEventListener("click", async (e) => {
   const t = e.target.closest("button, [data-close]");
   if (!t) return;
-  if (t.hasAttribute("data-close")) { t.closest(".modal").hidden = true; return; }
+  if (t.hasAttribute("data-close")) { if (t.closest("#sourceModal")) closeSource(); else t.closest(".modal").hidden = true; return; }
   if (t.dataset.src) { openSource(t.dataset.src, t.dataset.page, t.dataset.quote); return; }
   if (t.dataset.pagesel) {
     if (t.closest("#srcBody")) { openSource(t.dataset.doc, t.dataset.pagesel, ""); return; }
@@ -369,6 +435,7 @@ document.addEventListener("click", async (e) => {
   else if (act === "redraft") { runAgents(c, true); }
   else if (act === "delete-case") {
     if (t.dataset.confirm !== "1") { t.dataset.confirm = "1"; t.textContent = "Click again to delete"; return; }
+    fileStore.delCase(c.id); closeSource();
     cases = cases.filter((x) => x.id !== c.id); currentId = cases[0] ? cases[0].id : null; view = cases.length ? "cases" : "new"; save(); render();
   }
   else if (act === "edit-field") {
@@ -425,7 +492,7 @@ $("#fileInput").addEventListener("change", (e) => { const files = [...e.target.f
 ["dragenter", "dragover"].forEach((ev) => document.addEventListener(ev, (e) => { const d = e.target.closest && e.target.closest("#drop"); if (d) { e.preventDefault(); d.classList.add("over"); } }));
 ["dragleave", "drop"].forEach((ev) => document.addEventListener(ev, (e) => { const d = e.target.closest && e.target.closest("#drop"); if (d) { e.preventDefault(); d.classList.remove("over"); } }));
 document.addEventListener("drop", (e) => { const d = e.target.closest && e.target.closest("#drop"); if (d) { const files = [...e.dataTransfer.files]; if (files.length) newCaseFromFiles(files); } });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll(".modal").forEach((m) => (m.hidden = true)); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { document.querySelectorAll(".modal").forEach((m) => (m.hidden = true)); document.body.classList.remove("src-open"); } });
 document.querySelectorAll(".modal").forEach((m) => m.addEventListener("click", (e) => { if (e.target === m) m.hidden = true; }));
 
 /* interrupted runs from a previous visit */

@@ -261,6 +261,23 @@ textarea.ed { width: 100%; min-height: 150px; border: 1px solid var(--line); bor
 .audit .who.agent { color: var(--info); }
 @media (max-width: 600px) { .audit li { grid-template-columns: 50px minmax(0, 1fr); } .audit li .what { grid-column: 1 / -1; } }
 
+
+/* Source panel on the right */
+.modal.drawer { inset: 0 0 0 auto; width: min(640px, 100%); background: none; display: block; padding: 0; z-index: 25; }
+.drawer .dialog { width: 100%; height: 100%; max-height: none; border-radius: 0; box-shadow: -10px 0 34px rgba(0,0,0,.18); border-left: 1px solid var(--line); align-content: start; padding: 18px max(18px, env(safe-area-inset-right, 0px)) 18px 18px; }
+.drawer header .grow { flex: 1; min-width: 0; }
+.drawer header h2 { overflow-wrap: anywhere; }
+@media (min-width: 1760px) { body.src-open .app { margin-right: 640px; } }
+.pdfscroll { max-height: 72vh; overflow: auto; background: var(--surface); }
+.drawer .pdfscroll { max-height: calc(100vh - 190px); }
+.pdfslot.img { padding: 10px; }
+.pdfpage { position: relative; width: 100%; background: #fff; box-shadow: 0 1px 6px rgba(0,0,0,.18); }
+.pdfpage img { width: 100%; height: 100%; display: block; }
+.hlbox { position: absolute; background: rgba(255, 200, 0, .38); outline: 2px solid #D6001C; border-radius: 2px; mix-blend-mode: multiply; }
+.qnote { margin: 0; padding: 7px 12px; font-size: 12.5px; color: var(--muted); border-bottom: 1px solid var(--line); background: var(--bg); }
+.pagetext.paper { font-family: inherit; font-size: 13px; line-height: 1.6; background: #fff; color: #1a1a1a; margin: 10px; padding: 22px 26px; box-shadow: 0 1px 6px rgba(0,0,0,.18); max-height: none; }
+.readtext summary { cursor: pointer; font-size: 12.5px; font-weight: 700; padding: 4px 0; }
+
 /* Modals */
 .modal { position: fixed; inset: 0; z-index: 20; background: rgba(15, 16, 20, .45); display: grid; place-items: center;
   padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
@@ -289,9 +306,9 @@ textarea.ed { width: 100%; min-height: 150px; border: 1px solid var(--line); bor
 </div>
 <input type="file" id="fileInput" multiple hidden accept=".pdf,.txt,.eml,.md,.csv,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.webp">
 
-<div class="modal" id="sourceModal" hidden>
-  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="srcTitle">
-    <header><h2 id="srcTitle">Source</h2><button class="btn small" type="button" data-close>Close</button></header>
+<div class="modal drawer" id="sourceModal" hidden>
+  <div class="dialog" role="complementary" aria-labelledby="srcTitle">
+    <header><div class="grow"><div class="label">Source document</div><h2 id="srcTitle">Source</h2></div><button class="btn small" type="button" data-close>Close</button></header>
     <div id="srcBody"></div>
   </div>
 </div>
@@ -571,6 +588,7 @@ async function readFile(file) {
   const name = file.name; const lower = name.toLowerCase();
   const doc = { name, pages: [], images: [] };
   if (lower.endsWith(".pdf") || file.type === "application/pdf") {
+    doc.kind = "pdf";
     const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
@@ -586,21 +604,43 @@ async function readFile(file) {
       }
     }
   } else if (lower.endsWith(".docx")) {
+    doc.kind = "word";
     await loadScript("https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js");
     const r = await window.mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
     doc.pages.push(r.value.trim());
   } else if (/\.(xlsx|xls)$/.test(lower)) {
     await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+    doc.kind = "sheet";
     const wb = window.XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
     wb.SheetNames.forEach((sn) => doc.pages.push("Sheet: " + sn + "\n" + window.XLSX.utils.sheet_to_csv(wb.Sheets[sn])));
   } else if (/\.(png|jpe?g|webp)$/.test(lower) || (file.type || "").startsWith("image/")) {
     const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1]); fr.readAsDataURL(file); });
+    doc.kind = "image";
     doc.images.push({ page: 1, mime: file.type || "image/jpeg", b64 });
     doc.pages.push("[Image. Read from the image.]");
   } else {
     doc.pages.push((await file.text()).trim());
   }
   return doc;
+}
+
+
+/* ------------------------------------------------------------------ original files (IndexedDB, this browser only) */
+const fileStore = (() => {
+  let dbp = null;
+  const db = () => dbp || (dbp = new Promise((res, rej) => { try { const r = indexedDB.open("nashflow.files", 1); r.onupgradeneeded = () => r.result.createObjectStore("files"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }));
+  const tx = async (mode, fn) => { const d = await db(); return new Promise((res, rej) => { const t = d.transaction("files", mode); const q = fn(t.objectStore("files")); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }); };
+  return {
+    put: (k, v) => tx("readwrite", (s) => s.put(v, k)).catch(() => null),
+    get: (k) => tx("readonly", (s) => s.get(k)).catch(() => null),
+    delCase: (caseId) => tx("readwrite", (s) => s.delete(IDBKeyRange.bound(caseId + "/", caseId + "/￿"))).catch(() => null),
+  };
+})();
+const pdfCache = {}; // "case/doc" -> pdf.js document promise
+function pdfFor(caseId, docId) {
+  const k = caseId + "/" + docId;
+  if (!pdfCache[k]) pdfCache[k] = fileStore.get(k).then((f) => (f && f.bytes ? window.pdfjsLib.getDocument({ data: new Uint8Array(f.bytes) }).promise : null)).catch(() => null);
+  return pdfCache[k];
 }
 
 /* ------------------------------------------------------------------ state */
@@ -627,6 +667,7 @@ async function newCaseFromFiles(files, title) {
     try {
       const d = await readFile(f);
       d.id = "D" + i;
+      if (d.kind === "pdf") await fileStore.put(c.id + "/" + d.id, { name: f.name, bytes: await f.arrayBuffer() });
       d.images.forEach((im) => memImages[c.id].push(Object.assign({ doc: d.id }, im)));
       d.imagePages = d.images.map((im) => im.page);
       delete d.images;
@@ -656,6 +697,7 @@ Rules:
 - If the same field appears in more than one document, put the other occurrences in "others", even when they agree. This is used to check consistency. Include the broker email's figures as well as the formal documents' figures.
 - annual_rent is the current passing rent actually payable, not estimated rental value of vacant space.
 - property_country is inferred from the address and postcode.
+- borrower_name and company_number are the legal borrowing company. If the broker email or application form does not give them, take them from the accounts (the company name and registered number on the cover, directors' report or balance sheet), or from a Companies House printout. Always list what the accounts say in "others" too, so they can be compared.
 - A broker's rough figure ("around", "about", "we think") is Not confident unless a formal document confirms it. value_basis is "Broker estimate" when there is no valuation report.
 - Classify each document as one of: Broker email, Application form, Valuation report, Tenancy schedule, Lease, Accounts, Sales particulars, Companies House, EPC certificate, Redemption statement, Sponsor statement, Other. Give its date if shown.
 - List every tenant from a tenancy schedule or lease with annual rent (number), lease_end and break_date (YYYY-MM-DD, or null with a note if not clear). Exclude vacant units.
@@ -750,7 +792,9 @@ function normaliseExtraction(c, r) {
       for (const t of pr) { const hit = cands.find((k) => k.docType === t); if (hit) { used = hit; break; } }
     }
     if (used && state === "Not present") state = "Found";
-    const field = { key: f.key, state, value: used ? (NUMERIC.has(f.key) ? used.num : used.value) : null, source: used && used.doc ? { doc: used.doc, page: used.page || 1, quote: used.quote || "" } : null, note: raw.note || "", candidates: cands };
+    const fromBroker = cands.some((k) => k.docType === "Broker email" || k.docType === "Application form");
+    const backfill = (f.key === "borrower_name" || f.key === "company_number") && used && !fromBroker && ["Accounts", "Companies House"].includes(used.docType);
+    const field = { key: f.key, state, value: used ? (NUMERIC.has(f.key) ? used.num : used.value) : null, source: used && used.doc ? { doc: used.doc, page: used.page || 1, quote: used.quote || "" } : null, note: backfill ? `Not in the broker's submission. Taken from the ${used.docType === "Accounts" ? "accounts" : "Companies House record"}.` : raw.note || "", backfilled: backfill ? used.docType : null, candidates: cands };
     if (NUMERIC.has(f.key) && used && used.num != null) {
       const tol = f.type === "money" ? 0.01 : 0;
       const diff = cands.filter((k) => k.num != null && Math.abs(k.num - used.num) > Math.abs(used.num) * tol + 1e-9);
@@ -1195,13 +1239,75 @@ function highlight(text, quote) {
   }
   return { html, found };
 }
+function findQuote(text, quote) {
+  if (!quote) return null;
+  const words = quote.trim().split(/\s+/).map((w) => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  for (const n of [words.length, Math.min(5, words.length), Math.min(3, words.length)]) {
+    if (!n) break;
+    const m = new RegExp(words.slice(0, n).join("\\s+"), "i").exec(text);
+    if (m) return [m.index, m.index + m[0].length];
+  }
+  return null;
+}
+const pageImgCache = {};
+async function pdfPageImage(caseId, docId, page, quote) {
+  const key = [caseId, docId, page, quote || ""].join("|");
+  if (pageImgCache[key]) return pageImgCache[key];
+  const pdf = await pdfFor(caseId, docId);
+  if (!pdf) return null;
+  const pg = await pdf.getPage(page);
+  const vp = pg.getViewport({ scale: 2 });
+  const canvas = document.createElement("canvas"); canvas.width = Math.floor(vp.width); canvas.height = Math.floor(vp.height);
+  const ctx = canvas.getContext("2d"); ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, canvas.width, canvas.height);
+  await pg.render({ canvasContext: ctx, viewport: vp }).promise;
+  const rects = [];
+  if (quote) {
+    const tc = await pg.getTextContent();
+    let txt = ""; const spans = [];
+    tc.items.forEach((it) => { if (typeof it.str !== "string") return; spans.push({ it, a: txt.length, b: txt.length + it.str.length }); txt += it.str + (it.hasEOL ? "\n" : " "); });
+    const hit = findQuote(txt, quote);
+    if (hit) spans.filter((sp) => sp.b > hit[0] && sp.a < hit[1] && sp.it.str.length).forEach((sp) => {
+      const tx = window.pdfjsLib.Util.transform(vp.transform, sp.it.transform);
+      const h = Math.hypot(tx[2], tx[3]); const w = sp.it.width * vp.scale; const n = sp.it.str.length;
+      const f0 = Math.max(0, hit[0] - sp.a) / n, f1 = Math.min(n, hit[1] - sp.a + 1) / n;
+      rects.push({ x: (tx[4] + w * f0) / vp.width, y: (tx[5] - h * 1.05) / vp.height, w: (w * (f1 - f0)) / vp.width, h: (h * 1.3) / vp.height });
+    });
+  }
+  const out = { url: canvas.toDataURL("image/jpeg", 0.88), ratio: vp.width / vp.height, rects };
+  pageImgCache[key] = out;
+  return out;
+}
+/* Swap each PDF page placeholder for an image of the real page, with the quote highlighted */
+function hydratePages(root) {
+  (root || document).querySelectorAll(".pdfslot[data-doc]:not([data-done])").forEach(async (el) => {
+    el.dataset.done = "1";
+    const c = cur(); if (!c || c.id !== el.dataset.case) return;
+    try {
+      const r = await pdfPageImage(el.dataset.case, el.dataset.doc, +el.dataset.page, el.dataset.quote);
+      if (!r || !el.isConnected) return;
+      el.innerHTML = `<div class="pdfpage" style="aspect-ratio:${r.ratio}"><img alt="${esc(el.dataset.name)} page ${esc(el.dataset.page)}" src="${r.url}">${r.rects.map((q) => `<span class="hlbox" style="left:${(q.x * 100).toFixed(2)}%;top:${(q.y * 100).toFixed(2)}%;width:${(q.w * 100).toFixed(2)}%;height:${(q.h * 100).toFixed(2)}%"></span>`).join("")}</div>`;
+      el.classList.add("img");
+      const note = el.parentElement && el.parentElement.querySelector(".qnote");
+      if (note && el.dataset.quote) note.innerHTML = r.rects.length ? `Highlighted on the page: "${esc(el.dataset.quote)}"` : `The agent quoted "${esc(el.dataset.quote)}", which is not word for word on this page.`;
+      const hl = el.querySelector(".hlbox");
+      if (hl) { const sc = el.closest(".pdfscroll"); if (sc) sc.scrollTop = Math.max(0, hl.offsetTop - sc.clientHeight / 3); }
+    } catch (e) { /* keep the text view */ }
+  });
+}
 function pageView(c, docId, page, quote) {
   const d = c.docs.find((x) => x.id === docId); if (!d) return `<p class="hint">Document not found.</p>`;
   page = Math.min(Math.max(1, +page || 1), d.pages.length);
   const img = (memImages[c.id] || []).find((im) => im.doc === docId && im.page === page);
   const h = highlight(d.pages[page - 1] || "", quote);
   const nav = d.pages.length > 1 ? d.pages.map((_, i) => `<button class="btn small ${i + 1 === page ? "primary" : ""}" type="button" data-pagesel="${i + 1}" data-doc="${d.id}">p.${i + 1}</button>`).join("") : "";
-  return `<div class="pagebox"><div class="ph"><span>${esc(d.name)}</span><span class="row">${nav || "Page 1 of 1"}</span></div>${img ? `<img class="pageimg" alt="${esc(d.name)} page ${page}" src="data:${img.mime};base64,${img.b64}">` : `<div class="pagetext">${h.html || "(No text on this page)"}</div>`}</div>${quote && !h.found && !img ? `<p class="note">The agent quoted "${esc(quote)}", which is not word for word on this page.</p>` : ""}`;
+  const kindLabel = { pdf: "PDF", word: "Word document", sheet: "Spreadsheet", image: "Image" }[d.kind] || "Text";
+  const textView = `<div class="pagetext ${d.kind === "sheet" ? "" : "paper"}">${h.html || "(No text on this page)"}</div>`;
+  let viewer;
+  if (d.kind === "pdf") viewer = `<div class="pdfslot" data-case="${esc(c.id)}" data-doc="${esc(d.id)}" data-page="${page}" data-quote="${esc(quote || "")}" data-name="${esc(d.name)}">${img ? `<img class="pageimg" alt="${esc(d.name)} page ${page}" src="data:${img.mime};base64,${img.b64}">` : textView}</div>`;
+  else if (img) viewer = `<img class="pageimg" alt="${esc(d.name)} page ${page}" src="data:${img.mime};base64,${img.b64}">`;
+  else viewer = textView;
+  const qnote = quote ? `<p class="qnote">${h.found ? `Highlighted: "${esc(quote)}"` : d.kind === "pdf" ? `Looking for "${esc(quote)}" on the page` : `The agent quoted "${esc(quote)}", which is not word for word on this page.`}</p>` : "";
+  return `<div class="pagebox"><div class="ph"><span>${esc(d.name)} <span class="note">· ${kindLabel} · page ${page} of ${d.pages.length}</span></span><span class="row">${nav}</span></div>${qnote}<div class="pdfscroll">${viewer}</div></div>`;
 }
 function pickField(c) {
   if (!c.fields) return "annual_rent";
@@ -1219,14 +1325,14 @@ function renderSource(c) {
     const more = (x.candidates || []).filter((k) => k.doc).length - 1;
     const d = x.source ? c.docs.find((y) => y.id === x.source.doc) : null;
     const chip = !x.edited && c.consistency.some((y) => y.key === f.key) ? `<span class="chip c-amber">Mismatch</span>` : x.edited ? `<span class="chip c-green">${x.edited.confirmed ? "Confirmed" : "Corrected"}</span>` : `<span class="chip ${stateClass(x.state)}">${esc(x.state)}</span>`;
-    list += `<button type="button" class="frow ${selectedField === f.key ? "sel" : ""}" data-field="${f.key}"><span class="k">${esc(f.label)}</span>${chip}<span class="v">${esc(val) || '<span class="note">Blank</span>'}</span>${x.source ? `<span class="from">From ${esc(d ? d.type || d.name : x.source.doc)} p.${esc(x.source.page)}${more > 0 ? ` + ${more} more` : ""}</span>` : x.note ? `<span class="note">${esc(x.note)}</span>` : ""}</button>`;
+    list += `<button type="button" class="frow ${selectedField === f.key ? "sel" : ""}" data-field="${f.key}"><span class="k">${esc(f.label)}</span>${chip}<span class="v">${esc(val) || '<span class="note">Blank</span>'}</span>${x.source ? `<span class="from">From ${esc(d ? d.type || d.name : x.source.doc)} p.${esc(x.source.page)}${more > 0 ? ` + ${more} more` : ""}${x.backfilled ? " (not given by the broker)" : ""}</span>` : x.note ? `<span class="note">${esc(x.note)}</span>` : ""}</button>`;
   });
   const f = FIELD[selectedField]; const x = c.fields[selectedField];
   const val = x.value == null || x.value === "" ? "Blank" : f.type === "money" ? money(x.value) : String(x.value);
   const cands = (x.candidates || []).filter((k) => k.doc);
   const flag = c.consistency.find((y) => y.key === selectedField);
   const showDoc = srcDocSel && srcDocSel.field === selectedField ? srcDocSel : x.source ? { doc: x.source.doc, page: x.source.page, quote: x.source.quote } : cands[0] ? { doc: cands[0].doc, page: cands[0].page, quote: cands[0].quote } : null;
-  const usedLine = x.edited ? `${x.edited.confirmed ? "Confirmed" : "Corrected"} by you at ${timeOf(x.edited.at)}${!x.edited.confirmed ? `. Was "${esc(x.edited.old ?? "blank")}".` : "."}` : flag ? esc(flag.text) : x.source && cands.length > 1 ? `Found in ${cands.length} places and they agree.` : x.source ? "Found in one document." : esc(x.note || "Not found in the pack.");
+  const usedLine = x.backfilled && !x.edited ? esc(x.note) : x.edited ? `${x.edited.confirmed ? "Confirmed" : "Corrected"} by you at ${timeOf(x.edited.at)}${!x.edited.confirmed ? `. Was "${esc(x.edited.old ?? "blank")}".` : "."}` : flag ? esc(flag.text) : x.source && cands.length > 1 ? `Found in ${cands.length} places and they agree.` : x.source ? "Found in one document." : esc(x.note || "Not found in the pack.");
   const detail = `<div class="card sticky">
     <div class="cardhead"><h2>${esc(f.label)}: ${esc(val)}</h2>${x.edited ? `<span class="chip c-green">${x.edited.confirmed ? "Confirmed" : "Corrected"}</span>` : flag ? `<span class="chip c-amber">Mismatch</span>` : `<span class="chip ${stateClass(x.state)}">${esc(x.state)}</span>`}</div>
     <p class="hint">${usedLine}</p>
@@ -1342,6 +1448,7 @@ function render() {
   if (view === "case" && !c) view = cases.length ? "cases" : "new";
   const html = { new: renderNew, cases: renderCases, policy: renderPolicyAdmin, agents: renderAgentsAdmin }[view];
   $("#main").innerHTML = view === "case" ? renderCaseView(c) : html();
+  hydratePages($("#main"));
 }
 
 /* ------------------------------------------------------------------ source pop-out (from memo and policy tags) */
@@ -1350,11 +1457,14 @@ function openSource(docId, page, quote) {
   const d = c.docs.find((x) => x.id === docId);
   if (!d) { toast("That document is not in this case"); return; }
   $("#srcTitle").textContent = `${d.type ? d.type + ": " : ""}${d.name}`;
-  $("#srcBody").innerHTML = pageView(c, docId, page, quote);
+  $("#srcBody").innerHTML = pageView(c, docId, page, quote) + (d.kind !== "pdf" ? "" : `<details class="readtext"><summary>Text the agent read from this page</summary><div class="pagetext">${highlight(d.pages[Math.min(Math.max(1, +page || 1), d.pages.length) - 1] || "", quote).html}</div></details>`);
   $("#srcBody").dataset.doc = docId;
   $("#sourceModal").hidden = false;
-  const m = $("#srcBody mark"); if (m) m.scrollIntoView({ block: "center" });
+  document.body.classList.add("src-open");
+  hydratePages($("#srcBody"));
+  const m = $("#srcBody .pdfscroll mark"); if (m) { const sc = m.closest(".pdfscroll"); sc.scrollTop = Math.max(0, m.offsetTop - sc.clientHeight / 3); }
 }
+function closeSource() { $("#sourceModal").hidden = true; document.body.classList.remove("src-open"); }
 
 /* ------------------------------------------------------------------ settings */
 function renderSettings() {
@@ -1375,7 +1485,7 @@ function renderSettings() {
 document.addEventListener("click", async (e) => {
   const t = e.target.closest("button, [data-close]");
   if (!t) return;
-  if (t.hasAttribute("data-close")) { t.closest(".modal").hidden = true; return; }
+  if (t.hasAttribute("data-close")) { if (t.closest("#sourceModal")) closeSource(); else t.closest(".modal").hidden = true; return; }
   if (t.dataset.src) { openSource(t.dataset.src, t.dataset.page, t.dataset.quote); return; }
   if (t.dataset.pagesel) {
     if (t.closest("#srcBody")) { openSource(t.dataset.doc, t.dataset.pagesel, ""); return; }
@@ -1406,6 +1516,7 @@ document.addEventListener("click", async (e) => {
   else if (act === "redraft") { runAgents(c, true); }
   else if (act === "delete-case") {
     if (t.dataset.confirm !== "1") { t.dataset.confirm = "1"; t.textContent = "Click again to delete"; return; }
+    fileStore.delCase(c.id); closeSource();
     cases = cases.filter((x) => x.id !== c.id); currentId = cases[0] ? cases[0].id : null; view = cases.length ? "cases" : "new"; save(); render();
   }
   else if (act === "edit-field") {
@@ -1462,7 +1573,7 @@ $("#fileInput").addEventListener("change", (e) => { const files = [...e.target.f
 ["dragenter", "dragover"].forEach((ev) => document.addEventListener(ev, (e) => { const d = e.target.closest && e.target.closest("#drop"); if (d) { e.preventDefault(); d.classList.add("over"); } }));
 ["dragleave", "drop"].forEach((ev) => document.addEventListener(ev, (e) => { const d = e.target.closest && e.target.closest("#drop"); if (d) { e.preventDefault(); d.classList.remove("over"); } }));
 document.addEventListener("drop", (e) => { const d = e.target.closest && e.target.closest("#drop"); if (d) { const files = [...e.dataTransfer.files]; if (files.length) newCaseFromFiles(files); } });
-document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll(".modal").forEach((m) => (m.hidden = true)); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") { document.querySelectorAll(".modal").forEach((m) => (m.hidden = true)); document.body.classList.remove("src-open"); } });
 document.querySelectorAll(".modal").forEach((m) => m.addEventListener("click", (e) => { if (e.target === m) m.hidden = true; }));
 
 /* interrupted runs from a previous visit */
