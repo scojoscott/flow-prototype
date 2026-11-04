@@ -3,7 +3,8 @@ let view = cases.length ? "cases" : "new";
 let selectedField = "annual_rent";
 let srcDocSel = null;
 let editingSection = null;
-let draftDecision = { role: "Underwriter", choice: "", grade: "", rationale: "", conditions: "" };
+let draftDecision = { choice: "", grade: "", rationale: "", exception: "" };
+let commenting = null;
 const shortMoney = (n) => (n == null || !isFinite(n) ? "-" : n >= 1e6 ? "£" + (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 2).replace(/\.?0+$/, "") + "m" : n >= 1e3 ? "£" + Math.round(n / 1e3) + "k" : "£" + Math.round(n));
 
 function refChip(doc, page, quote, label) {
@@ -40,7 +41,9 @@ function missingCount(c) { return c.fields ? FIELDS.filter((f) => { const x = c.
 function renderNav() {
   const c = cur();
   const item = (id, label, badge, disabled) => `<button class="nav" type="button" data-view="${id}" ${view === id ? 'aria-current="page"' : ""} ${disabled ? "disabled" : ""}><span>${label}</span>${badge != null ? `<span class="badge">${badge}</span>` : ""}</button>`;
-  $("#navCases").innerHTML = `<div class="navlabel">Cases</div>${item("new", "New case")}${item("cases", "My cases", cases.length)}${item("case", "Case management", null, !c)}`;
+  $("#roleBox").innerHTML = `<div class="k">Working as</div><div class="roleseg">${ROLES.map((r) => `<button type="button" data-role="${esc(r)}" aria-pressed="${currentRole === r}">${r === "Relationship Manager" ? "Relationship Manager" : r}</button>`).join("")}</div><small>${currentRole === "Underwriter" ? "Reviews, sets conditions and decides." : "Checks the agents' work, prepares the case and submits it."}</small>`;
+  const mine = cases.filter((x) => waitingOn(x) === currentRole && x.memo).length;
+  $("#navCases").innerHTML = `<div class="navlabel">Cases</div>${item("new", "New case")}${item("cases", "My cases", mine || cases.length)}${item("case", "Case management", null, !c)}`;
   $("#navAdmin").innerHTML = `<div class="navlabel">Administration</div>${item("policy", "Credit policies")}${item("agents", "AI governance")}`;
 }
 
@@ -64,7 +67,7 @@ function caseRow(c) {
   const rec = c.rec && c.memo ? `<span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label.split(" (")[0])}</span>` : c.run && c.run.error ? `<span class="chip c-red">Run stopped</span>` : `<span class="chip c-grey">Pending</span>`;
   return `<tr><td class="num">${dateOf(c.createdAt)} ${timeOf(c.createdAt)}<span class="sub">uploaded</span></td>
     <td><b>${esc(c.title)}</b><span class="sub">${esc(c.ref)}${c.fields && usable(c, "broker") ? " · " + esc(usable(c, "broker")) : ""}</span></td>
-    <td class="fv">${shortMoney(L)}</td><td>${complete}</td><td>${consistent}</td><td>${esc(c.status)}</td><td>${rec}</td>
+    <td class="fv">${shortMoney(L)}</td><td>${complete}</td><td>${consistent}</td><td>${esc(STAGES[stageOf(c)])}${c.memo && waitingOn(c) === currentRole ? ` <span class="chip c-red">Your action</span>` : c.memo && waitingOn(c) ? `<span class="sub">Waiting on ${esc(waitingOn(c))}</span>` : ""}</td><td>${rec}</td>
     <td><button class="btn primary small" type="button" data-case="${c.id}">Open case</button></td></tr>`;
 }
 function renderCases() {
@@ -72,10 +75,11 @@ function renderCases() {
   const cc = done.filter((c) => c.rec.complete && c.rec.consistent).length;
   const more = done.filter((c) => c.rec.kind === "more").length;
   const exc = done.filter((c) => c.rec.kind === "escalate" || c.rec.kind === "decline").length;
-  return pageHead("My cases", "My cases", "Every deal pack you have run through the agents, with what they found. You check the agents' work and prepare the case.") +
+  const mine = done.filter((c) => waitingOn(c) === currentRole).length;
+  return pageHead("My cases", "My cases", currentRole === "Underwriter" ? "Cases the Relationship Managers have submitted to you, and the ones you have decided. Cases waiting on you are marked." : "Every deal pack the agents have read, with what they found. You check the agents' work, prepare the case and submit it to the Underwriter.") +
     `<div class="stats">
-      <div class="stat"><b>${cases.length}</b><span>Cases in this browser</span><small>Read by the agents</small></div>
-      <div class="stat"><b>${cc}</b><span>Complete and consistent</span><small>Ready for you to check</small></div>
+      <div class="stat"><b>${mine}</b><span>Waiting on you</span><small>As ${esc(currentRole)}</small></div>
+      <div class="stat"><b>${cc}</b><span>Complete and consistent</span><small>Of ${cases.length} in this browser</small></div>
       <div class="stat"><b>${more}</b><span>Need more information</span><small>Request drafted for the broker</small></div>
       <div class="stat"><b>${exc}</b><span>Exceptions or declines</span><small>Outside policy or appetite</small></div>
     </div>` +
@@ -101,13 +105,13 @@ function renderCaseView(c) {
   else body = { memo: renderMemoTab, source: renderSource, policy: renderPolicyTab, decision: renderDecision, audit: renderAudit }[currentTab](c);
   return pageHead("Case management", "Case management") + `
   <div class="casecard">
-    <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.status)}</span><span style="flex:1"></span><button class="btn small" type="button" data-act="delete-case">Delete case</button></div>
+    <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${c.memo && waitingOn(c) === currentRole ? `<span class="chip c-red">Your action</span>` : ""}<span style="flex:1"></span><button class="btn small" type="button" data-act="delete-case">Delete case</button></div>
     <div class="subline">${esc(sub)}</div>
     <div class="tiles">
       ${tile("Facility", shortMoney(L), T != null ? `${T} years${rb ? ", " + esc(rb) : ""}` : "")}
       ${tile("LTV", ltv ? esc(ltv.value) : "-", V != null ? `on ${shortMoney(V)} ${/estimate/i.test(String(usable(c, "value_basis") || "")) ? "estimate" : "valuation"}` : "", ltv && ltv.outcome === "Fail" ? "red" : "")}
       ${tile("Interest cover", icr ? esc(icr.value) : "-", `policy minimum ${POLICY.minICR}x`, icr && icr.outcome === "Fail" ? "red" : "")}
-      ${tile("Recommendation", c.rec && c.memo ? esc(c.rec.label.split(" (")[0]) : "-", c.rec && c.memo ? esc(c.rec.approver.split(" (")[0]) + " decides" : "", recTone)}
+      ${tile("Recommendation", c.rec && c.memo ? esc(c.rec.label.split(" (")[0]) : "-", c.rec && c.memo ? "Underwriter decides" : "", recTone)}
       ${tile("Risk grade", c.decision && c.decision.grade ? c.decision.grade + " of 10" : "Not set", "set by the Underwriter")}
       ${tile("Fields found", ready ? `${FIELDS.filter((f) => c.fields[f.key].state === "Found").length} of ${FIELDS.length}` : "-", ready ? (toCheck ? `${toCheck} for you to check` : "nothing to check") : "")}
     </div>
@@ -138,9 +142,11 @@ function renderMemoTab(c) {
     <div class="legend"><span><i style="background:var(--muted)"></i>Drafted by the memo agent until a person edits a section. Every edit is audited.</span><span><i style="background:var(--accent)"></i>Red tags open the source document and page.</span></div>
     ${MEMO_SECTIONS.map(([k, name]) => {
       const s = c.memo[k] || { text: "", by: "Memo agent" };
-      const by = s.by === "You" ? `Edited by you at ${timeOf(s.at)}` : s.by === "System" ? "From the calculated checks" : "Memo agent";
+      const by = s.by === "System" ? "From the calculated checks" : s.by === "Memo agent" ? "Memo agent" : `Edited by ${s.by === "You" ? "you" : s.by} at ${timeOf(s.at)}`;
+      const cm = ((c.comments || {})[k] || []);
+      const cmHtml = (cm.length ? `<div class="comments">${cm.map((x) => `<div class="cmt"><b>${esc(x.who)}</b><span class="note"> ${dateOf(x.at)} ${timeOf(x.at)}</span><p>${esc(x.text)}</p></div>`).join("")}</div>` : "") + (commenting === k ? `<div class="cmt-ed"><textarea class="ed" id="cmtEdit" aria-label="Comment on ${esc(name)}" placeholder="Your comment as ${esc(currentRole)}"></textarea><div class="row"><button class="btn primary small" type="button" data-act="save-cmt" data-key="${k}">Add comment</button><button class="btn small" type="button" data-act="cancel-cmt">Cancel</button></div></div>` : "");
       const body = editingSection === k ? `<textarea class="ed" id="memoEdit" aria-label="${esc(name)}">${esc(s.text)}</textarea><div class="row"><button class="btn primary small" type="button" data-act="save-sec" data-key="${k}">Save</button><button class="btn small" type="button" data-act="cancel-sec">Cancel</button></div>` : `<div class="memo-body">${renderRich(s.text) || '<p class="note">Empty</p>'}</div>`;
-      return `<section class="memo-sec"><header><h3>${esc(name)}</h3><span class="by">${by}</span><span class="grow"></span>${editingSection === k ? "" : `<button class="btn small" type="button" data-act="edit-sec" data-key="${k}">Edit</button>`}</header>${body}</section>`;
+      return `<section class="memo-sec"><header><h3>${esc(name)}</h3><span class="by">${by}</span><span class="grow"></span>${editingSection === k ? "" : `${cm.length ? `<span class="chip c-blue">${cm.length} comment${cm.length > 1 ? "s" : ""}</span>` : ""}<button class="btn small" type="button" data-act="comment" data-key="${k}">Comment</button><button class="btn small" type="button" data-act="edit-sec" data-key="${k}">Edit</button>`}</header>${body}${cmHtml}</section>`;
     }).join("")}</div>`;
   const req = c.brokerRequest ? `<div class="card"><div class="cardhead"><h2>Request to the broker</h2><span class="chip c-amber">Drafted</span></div><p class="hint">Drafted by the memo agent. Edit it, then copy it into your email. Nothing is sent from here.</p><textarea class="ed" id="brokerReq" aria-label="Request to the broker">${esc(c.brokerRequest)}</textarea><div class="row"><button class="btn" type="button" data-act="copy-req">Copy email</button><button class="btn" type="button" data-act="log-req">Mark as sent</button></div></div>` : "";
   return `<div class="grid2"><div class="stack">${recbar}${stale}${memo}</div><div class="stack">${renderAgents(c)}${req}${renderDocs(c)}</div></div>`;
@@ -279,51 +285,88 @@ function renderPolicyTab(c) {
     <div class="card"><h2>Judgement areas</h2><p class="hint">Assessed by the memo agent and explained, for a person to read and agree or not.</p>${c.judgements.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Provision</th><th>Policy</th><th></th><th>Outcome</th><th>Explanation</th></tr></thead><tbody>${c.judgements.map(row).join("")}</tbody></table></div>` : `<p class="hint">Not assessed yet.</p>`}</div>
   </div>`;
 }
-function authority(c, role) {
-  const L = num(c, "loan_amount") || 0; const exc = c.rec && c.rec.exceptions.length;
+function authority(c) {
+  const L = num(c, "loan_amount") || 0;
   if (L > POLICY.maxLoan) return { canApprove: false, why: "Over £10m is outside appetite. No one can approve it." };
-  if (role === "Underwriter") {
-    if (L > POLICY.uwLimit) return { canApprove: false, why: "Over £1m, so only Credit Committee can approve. You can escalate." };
-    if (exc) return { canApprove: false, why: "Policy exception, so only Credit Committee can approve. You can escalate." };
-  }
   return { canApprove: true, why: "" };
+}
+function decisionSummary(c) {
+  const d = c.decision; if (!d) return "";
+  const acc = (c.conditions || []).filter((x) => x.status === "accepted");
+  return `<div class="card"><div class="cardhead"><h2>Decision recorded</h2><span class="chip ${d.choice === "Approve" ? "c-green" : "c-red"}">${esc(d.choice)}</span></div>
+    <p class="hint">By ${esc(d.by || "the Underwriter")}, ${dateOf(d.at)} ${timeOf(d.at)}. Risk grade ${esc(d.grade || "not set")}.${d.override ? ` This differs from the suggestion (${esc(c.rec.label)}). Overrides are recorded and are a normal part of the process.` : ""}</p>
+    <div class="memo-sec"><header><h3>Rationale</h3></header><div class="memo-body">${renderRich(d.rationale)}</div></div>
+    ${d.exception ? `<div class="memo-sec"><header><h3>Reason for approving a policy exception</h3></header><div class="memo-body">${renderRich(d.exception)}</div></div>` : ""}
+    ${acc.length ? `<div class="memo-sec"><header><h3>Conditions (${acc.length})</h3></header><div class="memo-body"><ul>${acc.map((x) => `<li><b>${esc(x.type)}:</b> ${esc(x.text)}</li>`).join("")}</ul></div></div>` : ""}
+    ${currentRole === "Underwriter" ? `<div><button class="btn small" type="button" data-act="reopen">Reopen the decision</button></div>` : ""}</div>`;
+}
+function flowCard(c) {
+  const st = stageOf(c);
+  const steps = [["rm", "Relationship Manager prepares the case"], ["uw", "Underwriter reviews and decides"], ["done", "Decision recorded"]];
+  const at = st === "rm" || st === "returned" ? 0 : st === "uw" ? 1 : 2;
+  const hist = (c.handoffs || []).map((h) => `<li><span class="note">${dateOf(h.at)} ${timeOf(h.at)}</span> <b>${esc(h.who)}</b>: ${esc(h.what)}${h.note ? ` <span class="sub">"${esc(h.note)}"</span>` : ""}</li>`).join("");
+  return `<div class="card"><h2>Case flow</h2><ol class="flow">${steps.map(([id, t], i) => `<li class="${i < at ? "done" : i === at ? "now" : ""}">${esc(t)}${i === at && st === "returned" ? " (returned for more information)" : ""}</li>`).join("")}</ol>
+    ${hist ? `<div class="label">Hand-offs</div><ul class="handoffs">${hist}</ul>` : ""}
+    <p class="hint">The Underwriter approves every case up to £10m, including policy exceptions with a recorded reason. There is no Credit Committee. Neither admin role can approve credit.</p></div>`;
+}
+function conditionsCard(c, editable) {
+  const run = c.conditionsRun || {};
+  const list = c.conditions || [];
+  const rowsFor = (x) => `<div class="cond ${x.status}"><div class="ct"><span class="chip c-grey">${esc(x.type)}</span><span class="chip ${x.from === "Base set" ? "c-blue" : x.from === "Case specific" ? "c-amber" : "c-green"}">${esc(x.from)}</span>${x.status === "accepted" ? `<span class="chip c-green">Accepted</span>` : x.status === "rejected" ? `<span class="chip c-red">Rejected</span>` : ""}</div><p>${esc(x.text)}</p>${x.reason ? `<span class="note">${esc(x.reason)}</span>` : ""}
+    ${editable ? `<div class="row">${x.status !== "accepted" ? `<button class="btn small" type="button" data-act="cond-accept" data-id="${x.id}">Accept</button>` : ""}${x.status !== "rejected" ? `<button class="btn small" type="button" data-act="cond-reject" data-id="${x.id}">Reject</button>` : ""}</div>` : ""}</div>`;
+  const acc = list.filter((x) => x.status === "accepted").length, pend = list.filter((x) => x.status === "suggested").length;
+  return `<div class="card"><div class="cardhead"><h2>Conditions</h2>${run.running ? `<span class="chip c-amber">Conditions agent working <span class="spin" aria-hidden="true"></span></span>` : list.length ? `<span class="chip c-grey">${acc} accepted, ${pend} to review</span>` : ""}</div>
+    <p class="hint">Suggested by the conditions agent from the lender's base set of ${BASE_CONDITIONS.length} standard conditions, plus case-specific ones for this case's risks. ${editable ? "Accept or reject each one, and add your own." : "The Underwriter accepts or rejects each one."}</p>
+    ${run.error ? `<div class="errbox"><b>The conditions agent stopped.</b> ${esc(run.error)}</div>` : ""}
+    <div class="conds">${list.map(rowsFor).join("")}</div>
+    ${editable ? `<div class="edit-inline"><select id="condType" aria-label="Condition type">${["Condition precedent", "Condition subsequent", "Financial covenant", "Information covenant", "Undertaking"].map((t) => `<option>${t}</option>`).join("")}</select><input id="condText" type="text" placeholder="Add a condition" aria-label="New condition"><button class="btn small" type="button" data-act="cond-add">Add</button></div>
+    <div><button class="btn small" type="button" data-act="cond-run" ${run.running ? "disabled" : ""}>${list.length ? "Ask the conditions agent again" : "Ask the conditions agent"}</button></div>` : ""}</div>`;
 }
 function renderDecision(c) {
   if (!c.rec || !c.memo) return renderWorking(c);
+  const st = stageOf(c);
   const L = num(c, "loan_amount");
-  const side = `<div class="stack"><div class="card"><h2>Approval authority</h2>
-      <div class="signoff"><div><b>Underwriter</b><span>Up to £1m within policy</span></div>${c.rec.approver.startsWith("Underwriter") ? `<span class="chip c-green">Can decide</span>` : `<span class="chip c-grey">Escalate</span>`}</div>
-      <div class="signoff"><div><b>Credit Committee</b><span>Over £1m to £10m, and all policy exceptions</span></div>${c.rec.approver.startsWith("Credit") ? `<span class="chip c-green">Decides this case</span>` : `<span class="chip c-grey">If escalated</span>`}</div>
-      <p class="hint">Loan ${money(L)}${c.rec.exceptions.length ? "; policy exception: " + esc(c.rec.exceptions.join(", ")) : "; no policy exception"}. Limits come from the lender's credit policy. Neither admin role can approve credit.</p></div></div>`;
-  if (c.decision) {
-    const d = c.decision;
-    return `<div class="grid2"><div class="card"><div class="cardhead"><h2>Decision recorded</h2><span class="chip ${recChipClass({ "Approve": "approve", "Decline": "decline", "Request more information": "more", "Escalate to Credit Committee": "escalate" }[d.choice])}">${esc(d.choice)}</span></div>
-      <p class="hint">By you as ${esc(d.role)}, ${dateOf(d.at)} ${timeOf(d.at)}. Risk grade ${esc(d.grade || "not set")}.${d.override ? ` This differs from the suggestion (${esc(c.rec.label)}). Overrides are recorded and are a normal part of the process.` : ""}</p>
-      <div class="memo-sec"><header><h3>Rationale</h3></header><div class="memo-body">${renderRich(d.rationale)}</div></div>
-      ${d.conditions ? `<div class="memo-sec"><header><h3>Conditions</h3></header><div class="memo-body">${renderRich(d.conditions)}</div></div>` : ""}
-      <div><button class="btn small" type="button" data-act="reopen">Reopen the decision</button></div></div>${side}</div>`;
+  const side = `<div class="stack">${flowCard(c)}<div class="card"><h2>Approval authority</h2>
+      <div class="signoff"><div><b>Underwriter</b><span>Every case up to £10m, including policy exceptions with a recorded reason</span></div><span class="chip c-green">Decides this case</span></div>
+      <p class="hint">Loan ${money(L)}${c.rec.exceptions.length ? "; policy exception: " + esc(c.rec.exceptions.join(", ")) : "; no policy exception"}. Over £10m is outside appetite.</p></div></div>`;
+  const recbar = `<div class="recbar"><div class="line"><span>Recommendation (a suggestion; a person decides)</span><span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label)}</span></div>${c.rec.reasons.length ? `<ol>${c.rec.reasons.slice(0, 4).map((x) => `<li>${esc(x.text)}</li>`).join("")}</ol>` : ""}</div>`;
+  const sub = c.submitted ? `<div class="card"><h2>Note from the Relationship Manager</h2><p class="hint">Submitted by ${esc(c.submitted.by)}, ${dateOf(c.submitted.at)} ${timeOf(c.submitted.at)}.</p><div class="memo-body">${c.submitted.note ? renderRich(c.submitted.note) : '<p class="note">No note.</p>'}</div></div>` : "";
+  const ret = st === "returned" && c.returned ? `<div class="errbox"><b>Returned by the Underwriter, ${dateOf(c.returned.at)} ${timeOf(c.returned.at)}.</b> ${esc(c.returned.reason)}</div>` : "";
+  const switchTo = (r, why) => `<div class="card"><h2>${esc(why)}</h2><p class="hint">In the product each person sees only their own work. In this prototype, switch role to carry on.</p><div><button class="btn primary" type="button" data-role="${esc(r)}">Switch to ${esc(r)}</button></div></div>`;
+  let main;
+  if (st === "approved" || st === "declined") main = decisionSummary(c) + (currentRole === "Underwriter" ? "" : conditionsCard(c, false));
+  else if (currentRole === "Relationship Manager") {
+    if (st === "uw") main = sub + `<div class="card"><h2>With the Underwriter</h2><p class="hint">You submitted this case. You can still read it and add comments. The Underwriter can return it to you for more information.</p></div>` + switchTo("Underwriter", "Continue as the Underwriter");
+    else {
+      const toCheck = FIELDS.filter((f) => { const x = c.fields[f.key]; return !x.edited && (x.state === "Not confident" || (x.state === "Not present" && (f.mandatory || f.mandatoryIf))); }).length;
+      const mism = c.consistency.length; const reqSent = (c.audit || []).some((a) => /request to the broker as sent/i.test(a.what));
+      const edits = MEMO_SECTIONS.filter(([k]) => c.memo[k] && !["Memo agent", "System"].includes(c.memo[k].by)).length;
+      const item = (ok, text) => `<li class="${ok ? "ok" : "todo"}">${ok ? "Done" : "Open"}: ${esc(text)}</li>`;
+      main = ret + `<div class="card"><h2>Submit to the Underwriter</h2>
+        <ul class="ready">${item(!toCheck, toCheck ? `${toCheck} field${toCheck > 1 ? "s" : ""} to check in Source check` : "All fields checked")}${item(!mism, mism ? `${mism} mismatch${mism > 1 ? "es" : ""} between documents` : "No mismatches")}${c.rec.kind === "more" ? item(reqSent, reqSent ? "Request sent to the broker" : "Request to the broker not sent yet") : ""}${item(edits > 0, edits ? `You edited ${edits} memo section${edits > 1 ? "s" : ""}` : "Memo not reviewed yet (optional)")}</ul>
+        <div class="field"><label for="rmNote">Note to the Underwriter</label><textarea class="ed" id="rmNote" placeholder="What the Underwriter should know: your view, open points, anything you've checked with the broker"></textarea></div>
+        <div class="row"><button class="btn primary" type="button" data-act="submit-uw">Submit to the Underwriter</button><span class="note">Open items are shown to the Underwriter. The conditions agent runs when you submit.</span></div></div>`;
+    }
+  } else {
+    if (st !== "uw") main = ret + switchTo("Relationship Manager", "The Relationship Manager hasn't submitted this case yet");
+    else {
+      const dd = draftDecision; const au = authority(c);
+      const opts = [
+        ["Approve", "Indicative terms can be prepared.", !au.canApprove, au.why],
+        ["Decline", "The broker gets a polite decline.", false, ""],
+        ["Return to the RM", "For more information from the broker. The case goes back to the RM.", false, ""],
+      ];
+      if (dd.choice && opts.find((o) => o[0] === dd.choice && o[2])) dd.choice = "";
+      const exc = c.rec.exceptions.length && dd.choice === "Approve";
+      main = sub + conditionsCard(c, true) + `<div class="card"><h2>Credit decision</h2>
+        <div class="field"><label for="decGrade">Risk grade (1 best, 10 worst)</label><select id="decGrade"><option value="">Choose a grade</option>${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<option ${String(dd.grade) === String(n) ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+        <div class="choices">${opts.map(([name, desc, dis, why]) => `<label class="choice ${dis ? "disabled" : ""}"><input type="radio" name="decChoice" value="${esc(name)}" ${dis ? "disabled" : ""} ${dd.choice === name ? "checked" : ""}><span><b>${esc(name)}</b><small>${esc(dis && why ? why : desc)}</small></span></label>`).join("")}</div>
+        ${exc ? `<div class="field"><label for="decException">Reason for approving outside policy (required): ${esc(c.rec.exceptions.join(", "))}</label><textarea class="ed" id="decException" placeholder="Why the exception is acceptable, and any mitigants">${esc(dd.exception)}</textarea></div>` : ""}
+        <div class="field"><label for="decRationale">${dd.choice === "Return to the RM" ? "What the RM needs to get (required)" : "Rationale (required)"}</label><textarea class="ed" id="decRationale" placeholder="${dd.choice === "Return to the RM" ? "What is missing or needs checking" : "Why you made this decision"}">${esc(dd.rationale)}</textarea></div>
+        <div class="row"><button class="btn primary" type="button" data-act="record">${dd.choice === "Return to the RM" ? "Return to the RM" : "Record decision"}</button><span class="note" id="decMsg"></span></div></div>`;
+    }
   }
-  const dd = draftDecision; const au = authority(c, dd.role);
-  const opts = [
-    ["Approve", "Indicative terms can be prepared.", !au.canApprove, au.why],
-    ["Decline", "The broker gets a polite decline.", false, ""],
-    ["Request more information", "Back to the RM to ask the broker.", false, ""],
-    ["Escalate to Credit Committee", "Above your limit or a policy exception.", dd.role !== "Underwriter", "Already with Credit Committee."],
-  ];
-  if (dd.choice && opts.find((o) => o[0] === dd.choice && o[2])) dd.choice = "";
-  const condSuggest = c.memo && c.memo.conditions ? c.memo.conditions.text : "";
-  return `<div class="grid2"><div class="stack">
-    <div class="recbar"><div class="line"><span>Recommendation (a suggestion; a person decides)</span><span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label)}</span></div><p class="note">You can agree with it or override it. Either way, record your reasons.</p></div>
-    <div class="card"><h2>Risk grade and conditions</h2>
-      <div class="field"><label for="decGrade">Risk grade (1 best, 10 worst)</label><select id="decGrade"><option value="">Choose a grade</option>${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<option ${String(dd.grade) === String(n) ? "selected" : ""}>${n}</option>`).join("")}</select></div>
-      <div class="field"><label for="decConditions">Conditions</label><textarea class="ed" id="decConditions" placeholder="One condition per line, starting with -">${esc(dd.conditions)}</textarea>${condSuggest ? `<div><button class="btn small" type="button" data-act="use-conds">Use the memo's suggested conditions</button></div>` : ""}</div>
-    </div>
-    <div class="card"><h2>Credit decision</h2>
-      <div class="field"><label for="decRole">Acting as</label><select id="decRole"><option ${dd.role === "Underwriter" ? "selected" : ""}>Underwriter</option><option ${dd.role === "Credit Committee" ? "selected" : ""}>Credit Committee</option></select></div>
-      <div class="choices">${opts.map(([name, desc, dis, why]) => `<label class="choice ${dis ? "disabled" : ""}"><input type="radio" name="decChoice" value="${esc(name)}" ${dis ? "disabled" : ""} ${dd.choice === name ? "checked" : ""}><span><b>${esc(name)}</b><small>${esc(dis && why ? why : desc)}</small></span></label>`).join("")}</div>
-      <div class="field"><label for="decRationale">Rationale (required)</label><textarea class="ed" id="decRationale" placeholder="Why you made this decision">${esc(dd.rationale)}</textarea></div>
-      <div class="row"><button class="btn primary" type="button" data-act="record">Record decision</button><span class="note" id="decMsg"></span></div>
-    </div></div>${side}</div>`;
+  return `<div class="grid2"><div class="stack">${recbar}${main}</div>${side}</div>`;
 }
 function renderAudit(c) {
   return `<div class="card"><h2>Audit trail</h2><p class="hint">Every agent and human action on this case, oldest first. Policy version: ${esc(POLICY.version)}.</p><ul class="audit">${c.audit.map((a) => `<li><span class="num note">${timeOf(a.at)}</span><span class="who ${a.kind === "agent" ? "agent" : ""}">${esc(a.who)}</span><span class="what">${esc(a.what)}</span></li>`).join("")}</ul></div>`;
@@ -343,7 +386,7 @@ function renderPolicyAdmin() {
     ["Borrower", "UK limited company or SPV; personal guarantees from principal directors", "Reasoned"],
     ["Experience", "Borrower or directors have relevant property investment experience", "Reasoned"],
     ["Adverse credit", "No unsatisfied CCJs or insolvency events; explained historic adverse considered", "Reasoned"],
-    ["Approval authority", "Underwriter up to £1m within policy; Credit Committee over £1m to £10m and all exceptions; over £10m outside appetite", "Calculated"],
+    ["Approval authority", "Underwriter approves every case up to £10m, including policy exceptions with a recorded reason; over £10m outside appetite. No Credit Committee", "Calculated"],
   ];
   return pageHead("Credit policies", "Credit policies", "The policy the agents test each case against. This prototype uses the illustrative UK market standard policy from the broker submission flow doc. In the product, the Client Admin uploads the lender's own policy and an agent extracts the rules with links to each clause.") +
     `<div class="tablewrap"><table class="t"><thead><tr><th>Policy area</th><th>Criterion</th><th>Check type</th></tr></thead><tbody>${rows.map((r) => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td><span class="chip ${r[2] === "Calculated" ? "c-blue" : r[2] === "Mixed" ? "c-amber" : "c-grey"}">${r[2]}</span></td></tr>`).join("")}</tbody></table></div>
@@ -356,6 +399,7 @@ function renderAgentsAdmin() {
     ["Extraction agent", "Classifies each document and extracts the application fields with the document, page and exact text, using four states.", PROVIDERS[p].name],
     ["Policy agent", "Calculates loan size, term, LTV, ICR, DSCR, location, EPC, WAULT, concentration and document age, and suggests a recommendation.", "Code, no AI"],
     ["Memo agent", "Assesses the judgement areas, drafts the credit memo with sources and drafts a request to the broker.", PROVIDERS[p].name],
+    ["Conditions agent", `Runs when the RM submits a case. Suggests conditions from the lender's base set of ${BASE_CONDITIONS.length} and adds case-specific ones. The Underwriter accepts or rejects each.`, PROVIDERS[p].name],
   ];
   return pageHead("AI governance", "AI governance", "The agents in this prototype, what each one does and what runs it. Every agent action is in each case's audit trail.") +
     `<div class="tablewrap"><table class="t"><thead><tr><th>Agent</th><th>What it does</th><th>Runs on</th></tr></thead><tbody>${agents.map((a) => `<tr><td><b>${a[0]}</b></td><td>${a[1]}</td><td>${esc(a[2])}</td></tr>`).join("")}</tbody></table></div>
@@ -415,6 +459,7 @@ document.addEventListener("click", async (e) => {
   if (t.dataset.tab) { currentTab = t.dataset.tab; editingSection = null; render(); return; }
   if (t.dataset.field) { selectedField = t.dataset.field; srcDocSel = null; render(); return; }
   if (t.dataset.showdoc) { srcDocSel = { field: selectedField, doc: t.dataset.showdoc, page: t.dataset.page, quote: t.dataset.quote }; render(); return; }
+  if (t.dataset.role) { currentRole = t.dataset.role; store("nashflow.role", currentRole); draftDecision = { choice: "", grade: "", rationale: "", exception: "" }; render(); toast("Working as " + currentRole); return; }
   if (t.dataset.sample) {
     const s = SAMPLES[t.dataset.sample];
     const files = s.files.map((f) => new File([f.text != null ? f.text : b64ToBytes(f.b64)], f.name, { type: f.type }));
@@ -450,7 +495,7 @@ document.addEventListener("click", async (e) => {
   else if (act === "cancel-sec") { editingSection = null; render(); }
   else if (act === "save-sec") {
     const k = t.dataset.key; const before = (c.memo[k] || {}).text || ""; const after = $("#memoEdit").value;
-    if (after !== before) { c.memo[k] = { text: after, by: "You", at: nowISO() }; audit(c, "You", `Edited memo section "${MEMO_SECTIONS.find((x) => x[0] === k)[1]}". Before: "${before.slice(0, 160)}${before.length > 160 ? "..." : ""}" After: "${after.slice(0, 160)}${after.length > 160 ? "..." : ""}"`); }
+    if (after !== before) { c.memo[k] = { text: after, by: actor(), at: nowISO() }; audit(c, actor(), `Edited memo section "${MEMO_SECTIONS.find((x) => x[0] === k)[1]}". Before: "${before.slice(0, 160)}${before.length > 160 ? "..." : ""}" After: "${after.slice(0, 160)}${after.length > 160 ? "..." : ""}"`); }
     editingSection = null; save(); render();
   }
   else if (act === "copy-memo") {
@@ -458,31 +503,65 @@ document.addEventListener("click", async (e) => {
     copyText(txt, "Memo copied");
   }
   else if (act === "copy-req") { c.brokerRequest = $("#brokerReq").value; save(); copyText(c.brokerRequest, "Email copied"); }
-  else if (act === "log-req") { c.brokerRequest = $("#brokerReq").value; c.status = "More information requested"; audit(c, "You", "Marked the request to the broker as sent"); save(); render(); toast("Status: More information requested"); }
-  else if (act === "use-conds") { $("#decConditions").value = c.memo.conditions.text; draftDecision.conditions = c.memo.conditions.text; }
+  else if (act === "log-req") { c.brokerRequest = $("#brokerReq").value; c.status = "More information requested"; audit(c, actor(), "Marked the request to the broker as sent"); save(); render(); toast("Marked as sent to the broker"); }
+  else if (act === "comment") { commenting = t.dataset.key; render(); const el = $("#cmtEdit"); if (el) el.focus(); }
+  else if (act === "cancel-cmt") { commenting = null; render(); }
+  else if (act === "save-cmt") {
+    const txt = ($("#cmtEdit").value || "").trim(); if (!txt) return;
+    const k = t.dataset.key; c.comments = c.comments || {}; (c.comments[k] = c.comments[k] || []).push({ who: actor(), at: nowISO(), text: txt });
+    audit(c, actor(), `Commented on "${MEMO_SECTIONS.find((x) => x[0] === k)[1]}": ${txt}`); commenting = null; save(); render();
+  }
+  else if (act === "submit-uw") {
+    const note = ($("#rmNote") && $("#rmNote").value || "").trim();
+    c.submitted = { by: actor(), at: nowISO(), note }; c.stage = "uw"; c.status = STAGES.uw; c.returned = null;
+    (c.handoffs = c.handoffs || []).push({ at: nowISO(), who: actor(), what: "Submitted to the Underwriter", note });
+    audit(c, actor(), "Submitted the case to the Underwriter" + (note ? `. Note: ${note}` : ""));
+    save(); render(); toast("Submitted to the Underwriter");
+    if (!c.conditions || !c.conditions.length) runConditions(c);
+  }
+  else if (act === "cond-run") { runConditions(c); }
+  else if (act === "cond-accept" || act === "cond-reject") {
+    const x = (c.conditions || []).find((y) => y.id === t.dataset.id); if (!x) return;
+    x.status = act === "cond-accept" ? "accepted" : "rejected";
+    audit(c, actor(), `${x.status === "accepted" ? "Accepted" : "Rejected"} condition (${x.from}): ${x.text}`); readDecisionForm(); save(); render();
+  }
+  else if (act === "cond-add") {
+    const txt = ($("#condText").value || "").trim(); if (!txt) return;
+    c.conditions = c.conditions || []; const x = { id: "K" + (c.conditions.length + 1) + "u", type: $("#condType").value, text: txt, from: "Added by Underwriter", reason: "", status: "accepted", by: actor() };
+    c.conditions.push(x); audit(c, actor(), `Added condition (${x.type}): ${txt}`); readDecisionForm(); save(); render();
+  }
   else if (act === "record") {
     readDecisionForm();
     const dd = draftDecision;
     if (!dd.choice) { $("#decMsg").textContent = "Choose a decision."; return; }
-    if (!dd.rationale.trim()) { $("#decMsg").textContent = "Add your rationale. It is required."; return; }
+    if (!dd.rationale.trim()) { $("#decMsg").textContent = dd.choice === "Return to the RM" ? "Say what the RM needs to get." : "Add your rationale. It is required."; return; }
     if (dd.choice === "Approve" && !dd.grade) { $("#decMsg").textContent = "Choose a risk grade before approving."; return; }
-    const map = { "Approve": "approve", "Decline": "decline", "Request more information": "more", "Escalate to Credit Committee": "escalate" };
-    c.decision = Object.assign({}, dd, { at: nowISO(), override: map[dd.choice] !== c.rec.kind });
-    c.status = { "Approve": "Approved, pricing in progress", "Decline": "Declined", "Request more information": "More information requested", "Escalate to Credit Committee": "With Credit Committee" }[dd.choice];
-    audit(c, "You", `Recorded decision as ${dd.role}: ${dd.choice}${dd.grade ? ", risk grade " + dd.grade : ""}${c.decision.override ? " (differs from suggestion " + c.rec.label + ")" : ""}. Rationale: ${dd.rationale}`);
-    draftDecision = { role: dd.role === "Underwriter" && dd.choice.startsWith("Escalate") ? "Credit Committee" : dd.role, choice: "", grade: "", rationale: "", conditions: "" };
+    if (dd.choice === "Approve" && c.rec.exceptions.length && !dd.exception.trim()) { $("#decMsg").textContent = "Give your reason for approving outside policy."; return; }
+    if (dd.choice === "Approve" && (c.conditions || []).some((x) => x.status === "suggested")) { $("#decMsg").textContent = "Accept or reject each suggested condition first."; return; }
+    if (dd.choice === "Return to the RM") {
+      c.stage = "returned"; c.status = STAGES.returned; c.returned = { at: nowISO(), by: actor(), reason: dd.rationale };
+      (c.handoffs = c.handoffs || []).push({ at: nowISO(), who: actor(), what: "Returned to the RM for more information", note: dd.rationale });
+      audit(c, actor(), `Returned the case to the RM. Needed: ${dd.rationale}`);
+      draftDecision = { choice: "", grade: "", rationale: "", exception: "" }; save(); render(); toast("Returned to the RM"); return;
+    }
+    const kind = dd.choice === "Approve" ? (c.rec.kind === "approve" || c.rec.kind === "escalate") : c.rec.kind === "decline";
+    c.decision = { choice: dd.choice, grade: dd.grade, rationale: dd.rationale, exception: dd.choice === "Approve" ? dd.exception : "", by: actor(), role: actor(), at: nowISO(), override: !kind };
+    c.stage = dd.choice === "Approve" ? "approved" : "declined"; c.status = STAGES[c.stage];
+    (c.handoffs = c.handoffs || []).push({ at: nowISO(), who: actor(), what: dd.choice === "Approve" ? "Approved" : "Declined", note: "" });
+    audit(c, actor(), `Recorded decision: ${dd.choice}${dd.grade ? ", risk grade " + dd.grade : ""}${c.decision.override ? " (differs from suggestion " + c.rec.label + ")" : ""}. Rationale: ${dd.rationale}${c.decision.exception ? ". Exception reason: " + c.decision.exception : ""}`);
+    draftDecision = { choice: "", grade: "", rationale: "", exception: "" };
     save(); render();
   }
-  else if (act === "reopen") { audit(c, "You", `Reopened the decision (${c.decision.choice})`); c.decision = null; c.status = "In credit review"; save(); render(); }
+  else if (act === "reopen") { audit(c, actor(), `Reopened the decision (${c.decision.choice})`); c.decision = null; c.stage = "uw"; c.status = STAGES.uw; save(); render(); }
 });
 document.addEventListener("change", (e) => {
-  if (e.target.id === "decRole" || e.target.name === "decChoice") { readDecisionForm(); render(); }
+  if (e.target.name === "decChoice") { readDecisionForm(); render(); }
 });
 function readDecisionForm() {
   const g = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
-  draftDecision.role = g("decRole") || draftDecision.role;
+  if (!document.getElementById("decRationale")) return;
   const ch = document.querySelector('input[name="decChoice"]:checked'); draftDecision.choice = ch ? ch.value : "";
-  draftDecision.grade = g("decGrade"); draftDecision.rationale = g("decRationale"); draftDecision.conditions = g("decConditions");
+  draftDecision.grade = g("decGrade"); draftDecision.rationale = g("decRationale"); if (document.getElementById("decException")) draftDecision.exception = g("decException");
 }
 function copyText(txt, msg) {
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(() => toast(msg), () => fallbackCopy(txt, msg)); else fallbackCopy(txt, msg);

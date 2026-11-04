@@ -66,6 +66,13 @@ const memo = {
   broker_request: "Hi Ravi,\n\nThanks for sending Hulme Parade through. Before we go further, could you help with:\n- The rent: your email says £186,000 but the tenancy schedule shows £158,000\n- The position on Unit 6, which is holding over\n\nThanks,\n[Your name]",
 };
 
+const conditions = { conditions: [
+  { type: "Condition precedent", text: "First legal charge over 1 to 7 Hulme Parade", from: "B1", reason: "Standard security" },
+  { type: "Condition precedent", text: "Personal guarantees from Joanne and Patrick Redmond", from: "B9", reason: "Directors offered guarantees" },
+  { type: "Financial covenant", text: "ICR not below 1.35x, tested quarterly", from: "B17", reason: "ICR is below policy" },
+  { type: "Condition subsequent", text: "New lease for Unit 6 within 3 months of drawdown", from: "Case specific", reason: "Tenant holding over" },
+  { type: "Condition precedent", text: "Redemption statement from the existing lender", from: "B6", reason: "Refinance" },
+] };
 (async () => {
   const browser = await chromium.launch(process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {});
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -76,7 +83,7 @@ const memo = {
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   let prompts = [];
-  await page.exposeFunction("__mockAI", (purpose) => (purpose === "extract" ? extraction : memo));
+  await page.exposeFunction("__mockAI", (purpose) => (purpose === "extract" ? extraction : purpose === "conditions" ? conditions : memo));
   await page.exposeFunction("__logPrompt", (p) => { prompts.push(p); });
   await page.addInitScript(() => { window.__testAI = async (prompt, images, purpose) => { await window.__logPrompt(prompt.slice(0, 200000)); await new Promise((r) => setTimeout(r, 400)); return window.__mockAI(purpose); }; });
   await page.goto("file://" + path.join(__dirname, "../index.html"));
@@ -121,12 +128,69 @@ const memo = {
   await page.click('button[data-tab="memo"]');
   console.log("Stale banner:", await page.locator(".stale").count());
   await page.click('button[data-tab="decision"]');
-  await page.click('input[value="Escalate to Credit Committee"]');
-  await page.fill("#decRationale", "ICR below policy on passing rent.");
+  await page.fill("#rmNote", "Rent confirmed at £158k with the broker. Unit 6 lease renewal in hand.");
+  await page.screenshot({ path: OUT + "/5a-rm-submit.png", fullPage: true });
+  await page.click('button[data-act="submit-uw"]');
+  console.log("Stage after submit:", await page.locator(".casecard .chip.c-amber").first().innerText());
+  await page.click('.rolebox button[data-role="Underwriter"]');
+  await page.waitForSelector(".cond", { timeout: 10000 });
+  console.log("Your action chip:", await page.locator(".casecard .chip.c-red").count());
+  await page.click('button[data-tab="memo"]');
+  await page.locator('button[data-act="comment"]').first().click();
+  await page.fill("#cmtEdit", "Please confirm the Unit 6 position before completion.");
+  await page.click('button[data-act="save-cmt"]');
+  console.log("Comments:", await page.locator(".cmt").count());
+  await page.click('button[data-tab="decision"]');
+  const n = await page.locator('button[data-act="cond-accept"]').count();
+  console.log("Conditions suggested:", n);
+  await page.locator('button[data-act="cond-reject"]').last().click();
+  while (await page.locator('.cond.suggested button[data-act="cond-accept"]').count()) await page.locator('.cond.suggested button[data-act="cond-accept"]').first().click();
+  await page.fill("#condText", "Rent deposit of six months from Ironside Barbers");
+  await page.click('button[data-act="cond-add"]');
+  await page.selectOption("#decGrade", "5");
+  await page.click('input[value="Approve"]');
+  await page.fill("#decRationale", "Strong LTV and experienced sponsor.");
+  if (await page.locator("#decException").count()) {
+    await page.click('button[data-act="record"]');
+    console.log("Msg without exception reason:", await page.locator("#decMsg").innerText());
+    await page.fill("#decException", "ICR 1.32x on passing rent; mitigated by 65% LTV and guarantees.");
+  } else console.log("No policy exception after the rent correction");
+  await page.screenshot({ path: OUT + "/5b-uw-decide.png", fullPage: true });
   await page.click('button[data-act="record"]');
   console.log("Status:", await page.locator(".casecard .chip.c-amber").first().innerText());
+  await page.screenshot({ path: OUT + "/5c-decided.png", fullPage: true });
   await page.click('button[data-tab="audit"]');
   console.log("Audit rows:", await page.locator(".audit li").count());
+  // second case: policy exception and return to RM
+  await page.click('.rolebox button[data-role="Relationship Manager"]');
+  await page.click('button[data-view="new"]');
+  await page.click('button[data-sample="inconsistent"]');
+  await page.waitForSelector(".memo-sec", { timeout: 20000 });
+  await page.click('button[data-tab="decision"]');
+  await page.click('button[data-act="submit-uw"]');
+  await page.click('.rolebox button[data-role="Underwriter"]');
+  await page.waitForSelector(".cond", { timeout: 10000 });
+  await page.click('input[value="Return to the RM"]');
+  await page.fill("#decRationale", "Get the Unit 6 lease position from the broker.");
+  await page.click('button[data-act="record"]');
+  console.log("After return:", await page.locator(".casecard .chip.c-amber").first().innerText());
+  await page.click('.rolebox button[data-role="Relationship Manager"]');
+  console.log("RM sees return note:", await page.locator(".errbox").count());
+  await page.click('button[data-act="submit-uw"]');
+  await page.click('.rolebox button[data-role="Underwriter"]');
+  await page.waitForSelector(".cond");
+  while (await page.locator('.cond.suggested button[data-act="cond-accept"]').count()) await page.locator('.cond.suggested button[data-act="cond-accept"]').first().click();
+  await page.selectOption("#decGrade", "6");
+  await page.click('input[value="Approve"]');
+  await page.fill("#decRationale", "Acceptable with conditions.");
+  await page.click('button[data-act="record"]');
+  console.log("Exception msg:", await page.locator("#decMsg").innerText());
+  await page.fill("#decException", "ICR 1.32x mitigated by 65% LTV and guarantees.");
+  await page.screenshot({ path: OUT + "/5d-exception.png", fullPage: true });
+  await page.click('button[data-act="record"]');
+  console.log("Second status:", await page.locator(".casecard .chip.c-amber").first().innerText());
+  await page.click('button[data-view="cases"]');
+  await page.screenshot({ path: OUT + "/6b-cases-uw.png" });
   // mobile
   const m = await browser.newPage({ viewport: { width: 400, height: 860 } });
   await m.addInitScript(() => { window.__testAI = async () => { throw new Error("x"); }; });

@@ -601,6 +601,14 @@ function save() {
   store("nashflow.current", currentId);
 }
 const cur = () => cases.find((c) => c.id === currentId);
+/* Roles (requirements v1.1): the RM prepares the case, the Underwriter decides every case up to £10m. No Credit Committee. */
+const ROLES = ["Relationship Manager", "Underwriter"];
+let currentRole = load("nashflow.role", "Relationship Manager");
+if (!ROLES.includes(currentRole)) currentRole = "Relationship Manager";
+const actor = () => currentRole;
+const STAGES = { rm: "With RM", uw: "With Underwriter", returned: "Returned to RM", approved: "Approved", declined: "Declined" };
+function stageOf(c) { return c.stage || (c.decision ? (c.decision.choice === "Decline" ? "declined" : "approved") : "rm"); }
+function waitingOn(c) { const s = stageOf(c); return s === "uw" ? "Underwriter" : s === "rm" || s === "returned" ? "Relationship Manager" : null; }
 function audit(c, who, what, kind = "human") { c.audit.push({ at: nowISO(), who, what, kind }); }
 
 async function newCaseFromFiles(files, title) {
@@ -670,7 +678,7 @@ function memoPrompt(c) {
   FIELDS.forEach((f) => { const x = c.fields[f.key]; fieldsOut[f.key] = { state: x.state, value: x.value, source: x.source ? `[${x.source.doc} p${x.source.page}]` : null }; });
   const checks = c.checks.map((k) => ({ area: k.area, rule: k.rule, result: k.value, outcome: k.outcome, flag: k.flag, why: k.why }));
   const sens = (c.analysis || []).map((a) => ({ measure: a.label, value: a.value, comment: a.note }));
-  return `You are the memo agent in NashFlow, a commercial property lending tool for a UK specialist lender. Write as an experienced UK commercial real estate credit analyst preparing a credit paper for an Underwriter or Credit Committee. The agents assist; a person decides.
+  return `You are the memo agent in NashFlow, a commercial property lending tool for a UK specialist lender. Write as an experienced UK commercial real estate credit analyst preparing a credit paper for the Underwriter, who approves every case. The agents assist; a person decides.
 
 How to write:
 - The reader is a credit professional. Be analytical, not descriptive: after each fact, say what it means for the credit (security, income, cover, sponsor, exit). No padding, no marketing language.
@@ -779,7 +787,7 @@ function computeChecks(c) {
   if (L == null) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: "-", outcome: "Unclear", why: missing("loan amount") });
   else if (L > P.maxLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Above the £10m cap, so outside appetite.` });
   else if (L < P.minLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Below the £250,000 minimum.` });
-  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: `Within the lending range.${L > P.uwLimit ? " Over £1m, so a Credit Committee decision." : ""}` });
+  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: "Within the lending range. The Underwriter decides." });
 
   // Term
   const maxT = amort ? P.maxTermAmort : P.maxTermIO;
@@ -911,14 +919,13 @@ function computeRecommendation(c) {
   let kind, label;
   if (core.length) { kind = "decline"; label = "Decline (outside appetite)"; }
   else if (missing.length || outOfDate.length || unclear.length) { kind = "more"; label = "Request more information"; }
-  else if (exceptions.length) { kind = "escalate"; label = "Escalate (policy exception)"; }
+  else if (exceptions.length) { kind = "escalate"; label = "Policy exception (Underwriter to justify)"; }
   else { kind = "approve"; label = "Approve (within appetite)"; }
   const L = num(c, "loan_amount");
   let approver;
   if (L != null && L > POLICY.maxLoan) approver = "Outside appetite: decline";
-  else if (exceptions.length) approver = "Credit Committee (policy exception)";
-  else if (L != null && L > POLICY.uwLimit) approver = "Credit Committee (over £1m)";
-  else approver = "Underwriter (up to £1m)";
+  else if (exceptions.length) approver = "Underwriter (policy exception, reason required)";
+  else approver = "Underwriter";
   const complete = !missing.length; const consistent = !c.consistency.length;
   c.rec = { kind, label, reasons, approver, complete, consistent, exceptions: exceptions.map((k) => k.area), at: nowISO() };
 }
@@ -944,6 +951,80 @@ function refreshSystemSections(c) {
   if (!c.memo) return;
   const s = systemSections(c);
   Object.keys(s).forEach((k) => { const sec = c.memo[k]; if (!sec || sec.by === "System") c.memo[k] = { text: s[k], by: "System", at: nowISO() }; });
+}
+
+/* ------------------------------------------------------------------ conditions agent */
+/* Base set of standard conditions for a commercial property investment loan (illustrative, not from a lender) */
+const BASE_CONDITIONS = [
+  ["Condition precedent", "First legal charge over the property"],
+  ["Condition precedent", "Debenture from the borrower"],
+  ["Condition precedent", "Satisfactory valuation addressed to the lender, dated within 3 months of drawdown"],
+  ["Condition precedent", "Satisfactory report on title from the lender's solicitors"],
+  ["Condition precedent", "Buildings insurance with the lender's interest noted"],
+  ["Condition precedent", "Redemption statement from the existing lender and evidence of repayment at completion"],
+  ["Condition precedent", "Certified copies of all occupational leases"],
+  ["Condition precedent", "Rent account or bank statements evidencing the passing rent"],
+  ["Condition precedent", "Personal guarantees from the directors, with independent legal advice"],
+  ["Condition precedent", "Know your customer and anti-money laundering checks on the borrower, directors and persons with significant control"],
+  ["Condition precedent", "Board minutes approving the borrowing"],
+  ["Condition precedent", "Current EPC for each unit at E or better"],
+  ["Condition precedent", "Environmental desktop report"],
+  ["Condition precedent", "Evidence of the source of the borrower's equity contribution"],
+  ["Condition precedent", "Signed facility letter"],
+  ["Financial covenant", "Loan to value not to exceed the agreed covenant level, tested annually"],
+  ["Financial covenant", "Interest cover not below the agreed covenant level, tested quarterly"],
+  ["Financial covenant", "Debt service cover not below the agreed level, tested quarterly"],
+  ["Information covenant", "Annual audited or accountant-prepared accounts within 9 months of year end"],
+  ["Information covenant", "Quarterly rent roll and arrears report"],
+  ["Information covenant", "Notify the lender of any lease expiry, break notice or tenant insolvency"],
+  ["Undertaking", "No further charges over the property without consent"],
+  ["Undertaking", "No change of ownership or control of the borrower without consent"],
+  ["Undertaking", "No new lease, surrender or variation of a material lease without consent"],
+  ["Undertaking", "Maintain the property in good repair"],
+  ["Condition subsequent", "Re-letting of the vacant unit within an agreed period"],
+  ["Condition subsequent", "Completion of lease renewal for a tenant holding over within an agreed period"],
+  ["Condition subsequent", "EPC improvement plan for units below C before the date set by the lender"],
+  ["Condition subsequent", "Cash sweep or rent deposit if a major tenant serves a break notice"],
+  ["Condition subsequent", "Updated valuation at the lender's request, at the borrower's cost"],
+];
+function conditionsPrompt(c) {
+  const F = c.fields; const val = (k) => (F[k] && F[k].value != null && F[k].value !== "" ? F[k].value : "not known");
+  const facts = ["purpose", "loan_amount", "loan_term_years", "repayment_basis", "borrower_name", "directors", "property_address", "property_type", "tenure", "property_value", "epc_rating", "annual_rent", "existing_debt"].map((k) => `- ${FIELD[k].label}: ${val(k)}`).join("\n");
+  const flags = c.checks.concat(c.judgements).filter((k) => k.outcome !== "Pass" || k.flag).map((k) => `- ${k.area}: ${k.outcome}. ${k.why || k.explanation || ""}`).join("\n") || "- None";
+  const tenants = (c.tenants || []).map((t) => `- ${t.name}: ${money(t.annual_rent)}, lease end ${t.lease_end || "not clear"}${t.break_date ? ", break " + t.break_date : ""}${t.note ? " (" + t.note + ")" : ""}`).join("\n") || "- None listed";
+  return `You are the conditions agent in NashFlow, a commercial property lending tool for a UK specialist lender. Propose the conditions for this loan for the Underwriter to accept or reject. The Underwriter decides; you suggest.
+
+Use the lender's base set below where it applies to this case, and add case-specific conditions for the risks in this case (for example a vacant unit, a tenant holding over, a short WAULT, a low EPC, a policy exception, a mismatch in the figures). Do not include base conditions that do not apply (for example a redemption statement on a purchase). Keep each condition to one sentence in plain UK English. For covenants, use the proposed levels: LTV ${COVENANTS.ltv}% maximum, ICR ${COVENANTS.icr}x minimum.
+
+Base set:
+${BASE_CONDITIONS.map(([t, x], i) => `B${i + 1}. [${t}] ${x}`).join("\n")}
+
+Case facts:
+${facts}
+
+Tenants:
+${tenants}
+
+Policy flags and judgement areas:
+${flags}
+
+Recommendation: ${c.rec ? c.rec.label : "not yet"}
+
+Reply with only this JSON:
+{"conditions": [{"type": "Condition precedent | Condition subsequent | Financial covenant | Information covenant | Undertaking", "text": "...", "from": "B3 or Case specific", "reason": "why it applies to this case, one short sentence"}]}`;
+}
+async function runConditions(c) {
+  c.conditionsRun = { running: true, error: null }; render();
+  try {
+    const r = await askAI(conditionsPrompt(c), [], "conditions");
+    c.conditions = (r.conditions || []).filter((x) => x && x.text).map((x, i) => ({ id: "K" + (i + 1), type: x.type || "Condition precedent", text: String(x.text), from: /^B\d+$/.test(String(x.from || "")) ? "Base set" : "Case specific", reason: x.reason || "", status: "suggested", by: "Conditions agent" }));
+    audit(c, "Conditions agent", `Suggested ${c.conditions.length} conditions (${c.conditions.filter((x) => x.from === "Base set").length} from the base set, ${c.conditions.filter((x) => x.from !== "Base set").length} case specific)`, "agent");
+    c.conditionsRun = { running: false, error: null };
+  } catch (e) {
+    c.conditionsRun = { running: false, error: e.message || String(e) };
+    audit(c, "System", "Conditions agent stopped: " + c.conditionsRun.error, "agent");
+  }
+  save(); render();
 }
 
 /* ------------------------------------------------------------------ the agent run */
@@ -997,7 +1078,8 @@ async function runAgents(c, onlyMemo = false) {
     set("memo", "done", `Memo drafted; ${c.judgements.filter((j) => j.outcome !== "Pass").length} judgement area${c.judgements.filter((j) => j.outcome !== "Pass").length === 1 ? "" : "s"} to review`);
     audit(c, "Memo agent", "Assessed 5 judgement areas and drafted the credit memo", "agent");
     audit(c, "Policy agent", `Suggested ${c.rec.label}; required approver ${c.rec.approver}`, "agent");
-    c.status = c.decision ? c.status : "With RM";
+    if (!c.stage) c.stage = "rm";
+    c.status = STAGES[stageOf(c)];
   } catch (e) {
     const s = steps.find((x) => x.state === "active"); if (s) s.state = "error";
     c.run.error = e.message || String(e);
@@ -1012,17 +1094,17 @@ function editField(c, key, newVal) {
   const f = c.fields[key]; const old = f.value;
   const v = NUMERIC.has(key) ? parseNum(newVal) : newVal.trim();
   if (NUMERIC.has(key) && v == null) { toast("Enter a number"); return; }
-  f.value = v; f.state = "Found"; f.edited = { by: "You", at: nowISO(), old };
+  f.value = v; f.state = "Found"; f.edited = { by: actor(), at: nowISO(), old };
   c.consistency = c.consistency.filter((x) => x.key !== key && x.key !== "tenants_sum");
   applyNA(c);
-  audit(c, "You", `Corrected ${FIELD[key].label}: "${old ?? "blank"}" to "${v}"`);
+  audit(c, actor(), `Corrected ${FIELD[key].label}: "${old ?? "blank"}" to "${v}"`);
   computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c);
   if (c.memo) c.memoStale = true;
   save(); render();
 }
 function confirmField(c, key) {
-  const f = c.fields[key]; f.edited = { by: "You", at: nowISO(), old: f.value, confirmed: true }; f.state = "Found";
-  audit(c, "You", `Confirmed ${FIELD[key].label} as "${f.value}"`);
+  const f = c.fields[key]; f.edited = { by: actor(), at: nowISO(), old: f.value, confirmed: true }; f.state = "Found";
+  audit(c, actor(), `Confirmed ${FIELD[key].label} as "${f.value}"`);
   computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c); save(); render();
 }
 

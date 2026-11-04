@@ -270,6 +270,34 @@ textarea.ed { width: 100%; min-height: 150px; border: 1px solid var(--line); bor
 .pagetext.paper { font-family: inherit; font-size: 13px; line-height: 1.6; background: #fff; color: #1a1a1a; margin: 10px; padding: 22px 26px; box-shadow: 0 1px 6px rgba(0,0,0,.18); max-height: none; }
 .readtext summary { cursor: pointer; font-size: 12.5px; font-weight: 700; padding: 4px 0; }
 
+
+/* Roles and flow */
+.rolebox { display: grid; gap: 6px; }
+.rolebox .k { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.rolebox small { font-size: 11.5px; color: var(--muted); line-height: 1.35; }
+.roleseg { display: grid; gap: 4px; }
+@media (max-width: 860px) { .roleseg { grid-template-columns: 1fr 1fr; } .rolebox small { display: none; } }
+.roleseg button { font: inherit; font-size: 13px; font-weight: 700; text-align: left; padding: 8px 10px; border-radius: var(--r); border: 1px solid var(--line); background: var(--bg); color: var(--ink); cursor: pointer; }
+.roleseg button[aria-pressed="true"] { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.flow { margin: 0; padding-left: 20px; display: grid; gap: 6px; font-size: 13.5px; }
+.flow li.done { color: var(--muted); }
+.flow li.now { font-weight: 800; color: var(--accent); }
+.handoffs { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.ready { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13.5px; }
+.ready li { padding-left: 10px; border-left: 3px solid var(--line); }
+.ready li.ok { border-color: #2e7d4f; }
+.ready li.todo { border-color: #c77700; }
+.conds { display: grid; gap: 8px; }
+.cond { border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; display: grid; gap: 6px; }
+.cond p { margin: 0; font-size: 13.5px; }
+.cond .ct { display: flex; gap: 6px; flex-wrap: wrap; }
+.cond.rejected p { text-decoration: line-through; color: var(--muted); }
+.cond.accepted { border-color: #2e7d4f; }
+.comments { display: grid; gap: 6px; margin-top: 8px; }
+.cmt { background: var(--surface); border-left: 3px solid var(--info, #2a5db0); padding: 8px 10px; border-radius: 4px; font-size: 13px; }
+.cmt p { margin: 4px 0 0; }
+.cmt-ed { display: grid; gap: 6px; margin-top: 8px; }
+
 /* Modals */
 .modal { position: fixed; inset: 0; z-index: 20; background: rgba(15, 16, 20, .45); display: grid; place-items: center;
   padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
@@ -287,6 +315,7 @@ textarea.ed { width: 100%; min-height: 150px; border: 1px solid var(--line); bor
   <nav class="side" aria-label="Main">
     <div class="logo"><span class="mark">NT</span><span><b>NashFlow</b><small>NASHTECH</small></span></div>
     <div class="lender"><div class="k">Lender</div><b>Demo lender (prototype)</b></div>
+    <div class="rolebox" id="roleBox"></div>
     <div class="navgroup" id="navCases"></div>
     <div class="navgroup" id="navAdmin"></div>
     <div class="foot">
