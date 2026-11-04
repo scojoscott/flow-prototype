@@ -399,6 +399,7 @@ const PROVIDERS = {
   "azure": { name: "Azure OpenAI", desc: "Your Azure OpenAI resource, for example NashTech's own. Works in the downloaded copy." },
 };
 const GEMINI_DEFAULT = "gemini-3.8-flash";
+let geminiSessionModel = null; // a fallback used for the rest of this visit when the chosen model is busy
 let settings = Object.assign({ provider: "auto", geminiKey: "", geminiModel: GEMINI_DEFAULT, claudeKey: "", claudeModel: "claude-sonnet-5-5", azureEndpoint: "", azureDeployment: "", azureKey: "", azureVersion: "2024-10-21" }, load("nashflow.settings", {}));
 if (/^gemini-(1|2)\./.test(settings.geminiModel || "")) { settings.geminiModel = GEMINI_DEFAULT; store("nashflow.settings", settings); }
 let sampleFn = null;
@@ -417,11 +418,22 @@ function activeProvider() {
 function renderProviderPill() {
   const p = activeProvider();
   let label = PROVIDERS[p].name;
-  if (p === "gemini") label += settings.geminiKey ? "" : " (add key in Settings)";
+  if (p === "gemini") label += settings.geminiKey ? ` (${geminiSessionModel || settings.geminiModel})` : " (add key in Change AI provider)";
   if (p === "claude-builtin" && !sampleFn && sampleChecked) label += " (not available here)";
   $("#providerPill").textContent = "AI: " + label;
 }
 
+
+async function geminiAlternatives(current) {
+  try {
+    const res = await fetch("https://generativelanguage.googleapis.com/v1beta/models?pageSize=200", { headers: { "x-goog-api-key": settings.geminiKey } });
+    const d = await res.json();
+    const names = (d.models || []).filter((m) => (m.supportedGenerationMethods || []).includes("generateContent")).map((m) => String(m.name).replace(/^models\//, ""))
+      .filter((n) => /^gemini-/.test(n) && /flash/.test(n) && !/image|tts|live|audio|embed|vision|exp|latest/.test(n) && n !== current);
+    const ver = (n) => parseFloat((n.match(/gemini-(\d+(?:\.\d+)?)/) || [0, 0])[1]);
+    return names.sort((a, b) => ver(b) - ver(a) || (/lite/.test(a) ? 1 : 0) - (/lite/.test(b) ? 1 : 0));
+  } catch (e) { return []; }
+}
 async function askAI(prompt, images, purpose) {
   if (window.__testAI) return window.__testAI(prompt, images, purpose);
   const p = activeProvider();
@@ -447,36 +459,45 @@ async function askAI(prompt, images, purpose) {
   if (p === "gemini") {
     if (!settings.geminiKey) throw new Error("Add your Gemini key in Change AI provider first (free from aistudio.google.com).");
     const parts = [{ text: prompt }].concat(images.map((im) => ({ inline_data: { mime_type: im.mime, data: im.b64 } })));
-    const waits = [5, 15, 30]; let busyTries = 0; let switched = false;
-    for (;;) {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.geminiModel)}:generateContent`, {
+    const call = async (model) => {
+      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": settings.geminiKey },
         body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0.1, responseMimeType: "application/json" } }),
       }).catch(() => { throw new Error("Could not reach Google. Check your internet connection. Inside the claude.ai link Gemini cannot be used; choose Claude (built in) there."); });
       const data = await res.json().catch(() => ({}));
-      if (res.ok) {
-        const text = (data.candidates?.[0]?.content?.parts || []).map((x) => x.text || "").join("");
-        return parseJSONLoose(text);
-      }
       const msg = (data.error && data.error.message) || String(res.status);
-      // Google retires models: if the error names a replacement, switch to it once and remember it.
-      const next = (msg.match(/use (?:models\/)?(gemini-[\w.-]+)/i) || [])[1];
-      if (!switched && next && next !== settings.geminiModel && /no longer available|deprecated|not found|retired/i.test(msg)) {
-        switched = true;
-        settings.geminiModel = next.replace(/[.,;]+$/, ""); store("nashflow.settings", settings); renderProviderPill();
-        toast("Switched to " + settings.geminiModel);
-        continue;
+      const busy = !res.ok && ([429, 500, 503].includes(res.status) || /high demand|overloaded|try again|unavailable|rate limit|quota/i.test(msg));
+      return { ok: res.ok, data, msg, busy, status: res.status };
+    };
+    const done = (r) => parseJSONLoose((r.data.candidates?.[0]?.content?.parts || []).map((x) => x.text || "").join(""));
+    // 1. The chosen model (or the one a busy run last fell back to), switching once if Google names a replacement.
+    let model = geminiSessionModel || settings.geminiModel;
+    let r = await call(model);
+    if (!r.ok && !r.busy) {
+      const next = (r.msg.match(/use (?:models\/)?(gemini-[\w.-]+)/i) || [])[1];
+      if (next && /no longer available|deprecated|not found|retired/i.test(r.msg)) {
+        model = next.replace(/[.,;]+$/, ""); settings.geminiModel = model; store("nashflow.settings", settings); renderProviderPill();
+        toast("Switched to " + model);
+        r = await call(model);
       }
-      // Busy or rate limited: wait and try again a few times before giving up.
-      const busy = [429, 500, 503].includes(res.status) || /high demand|overloaded|try again|unavailable|rate limit|quota/i.test(msg);
-      if (busy && busyTries < waits.length) {
-        const w = waits[busyTries++];
-        toast(`Google is busy. Trying again in ${w} seconds (${busyTries} of ${waits.length})`);
-        await new Promise((r) => setTimeout(r, w * 1000));
-        continue;
-      }
-      throw new Error(busy ? "Google's free tier is still busy after several tries. Wait a few minutes and click Run the agents again." : "Gemini said: " + msg);
     }
+    if (r.ok) return done(r);
+    if (!r.busy) throw new Error("Gemini said: " + r.msg);
+    // 2. Busy: wait briefly and retry the same model.
+    for (const w of [5, 15]) {
+      toast(`Google is busy. Trying again in ${w} seconds`);
+      await new Promise((res) => setTimeout(res, w * 1000));
+      r = await call(model);
+      if (r.ok) return done(r);
+      if (!r.busy) throw new Error("Gemini said: " + r.msg);
+    }
+    // 3. Still busy: try other Gemini models this key can use, newest first.
+    for (const alt of (await geminiAlternatives(model)).slice(0, 4)) {
+      toast(`${model} is busy. Trying ${alt}`);
+      const ra = await call(alt);
+      if (ra.ok) { geminiSessionModel = alt; renderProviderPill(); return done(ra); }
+    }
+    throw new Error("Google's free Gemini models are all busy right now. Wait a few minutes and click Run the agents again, or use the claude.ai link, which uses Claude instead.");
   }
   if (p === "claude-api") {
     if (!settings.claudeKey) throw new Error("Add your Claude API key in Settings first.");
