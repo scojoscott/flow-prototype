@@ -16,6 +16,7 @@ Use made-up or anonymised deal packs only.
 Open the GitHub Pages address for this repository. In the sidebar, choose **Change AI provider** and paste a key:
 
 - **Google Gemini**: free key from aistudio.google.com. On the free tier Google may use what you send to improve its models.
+  If the chosen Gemini model is busy, the app retries and then switches to another available Gemini Flash model for the rest of the visit. The model in use shows under "AI provider" in the left-hand menu.
 - **Claude API**: an Anthropic API key.
 - **Azure OpenAI**: endpoint, deployment name and key.
 
