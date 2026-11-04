@@ -1,0 +1,1261 @@
+<title>NashFlow Deal Processor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout: red top bar, case list on the left, case workspace on the right with tabs. Stacks to one column on phones. */
+:root {
+  --bg: #ffffff;
+  --surface: #f8f5f5;
+  --surface-2: #f1ecec;
+  --ink: #1d1517;
+  --muted: #6c5f62;
+  --line: #e6dcdd;
+  --accent: #d6001c;
+  --accent-ink: #ffffff;
+  --accent-soft: #fde8ea;
+  --pass: #1d7a4b;
+  --pass-soft: #e5f4ec;
+  --amber: #a85f00;
+  --amber-soft: #fdf1e0;
+  --fail: #b3001b;
+  --fail-soft: #fbe4e7;
+  --info: #44597a;
+  --info-soft: #e8edf5;
+  --hl: #ffe58a;
+  --shadow: 0 1px 2px rgba(60, 10, 20, .06), 0 4px 16px rgba(60, 10, 20, .06);
+  --font: "Mulish", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #141011; --surface: #1d1718; --surface-2: #261f20; --ink: #f4eeef; --muted: #ab9fa2; --line: #382e30;
+    --accent: #ff3550; --accent-ink: #ffffff; --accent-soft: #3a1419;
+    --pass: #5fd39a; --pass-soft: #12291d; --amber: #f2b45a; --amber-soft: #2e2210; --fail: #ff6b7d; --fail-soft: #33141a;
+    --info: #9fb4d6; --info-soft: #1a2230; --hl: #6b5a12; --shadow: 0 1px 2px rgba(0,0,0,.4);
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #141011; --surface: #1d1718; --surface-2: #261f20; --ink: #f4eeef; --muted: #ab9fa2; --line: #382e30;
+  --accent: #ff3550; --accent-ink: #ffffff; --accent-soft: #3a1419;
+  --pass: #5fd39a; --pass-soft: #12291d; --amber: #f2b45a; --amber-soft: #2e2210; --fail: #ff6b7d; --fail-soft: #33141a;
+  --info: #9fb4d6; --info-soft: #1a2230; --hl: #6b5a12; --shadow: 0 1px 2px rgba(0,0,0,.4);
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+body { background: var(--bg); color: var(--ink); font-family: var(--font); font-size: 14px; line-height: 1.5; }
+body::before { content: ""; position: fixed; inset: 0 0 auto; height: env(safe-area-inset-top, 0px); z-index: 10; background: #d6001c; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* Top bar */
+.topbar { position: sticky; top: env(safe-area-inset-top, 0px); z-index: 5; background: #d6001c; color: #fff;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 10px;
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
+.brand { display: flex; align-items: baseline; gap: 10px; }
+.brand b { font-weight: 800; font-size: 20px; letter-spacing: -.01em; }
+.brand span { font-size: 13px; opacity: .9; }
+.topbar .spacer { flex: 1; }
+.pill-provider { background: rgba(255,255,255,.16); border: 1px solid rgba(255,255,255,.35); border-radius: 999px; padding: 4px 12px; font-size: 12.5px; color: #fff; }
+.btn-top { background: #fff; color: #b00018; border: 0; border-radius: 6px; padding: 6px 12px; font-weight: 700; font-size: 13px; }
+.notice { background: var(--accent-soft); color: var(--ink); border-bottom: 1px solid var(--line); font-size: 13px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-block: 8px; }
+.notice strong { color: var(--accent); }
+
+/* Shell */
+.shell { display: grid; grid-template-columns: 290px minmax(0, 1fr); gap: 0; min-height: calc(100vh - 100px); }
+aside { border-right: 1px solid var(--line); background: var(--surface); padding-block: 18px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: 16px; display: flex; flex-direction: column; gap: 18px; }
+main { padding-block: 20px 60px; padding-left: 24px; padding-right: max(16px, env(safe-area-inset-right, 0px)); min-width: 0; }
+@media (max-width: 860px) {
+  .shell { grid-template-columns: 1fr; }
+  aside { border-right: 0; border-bottom: 1px solid var(--line); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+  main { padding-left: max(16px, env(safe-area-inset-left, 0px)); }
+}
+.label { font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--muted); }
+.drop { border: 1.5px dashed var(--line); border-radius: var(--r); background: var(--bg); padding: 16px; text-align: center; display: grid; gap: 8px; transition: border-color .15s, background .15s; }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop p { margin: 0; font-size: 13px; color: var(--muted); }
+.btn { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 7px 12px; font-weight: 600; font-size: 13px; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(.95); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.small { padding: 4px 9px; font-size: 12px; }
+.btn.link { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 700; }
+.samples { display: grid; gap: 8px; }
+.sample { text-align: left; border: 1px solid var(--line); background: var(--bg); border-radius: var(--r); padding: 10px 12px; display: grid; gap: 2px; }
+.sample:hover { border-color: var(--accent); }
+.sample b { font-size: 13.5px; }
+.sample span { font-size: 12.5px; color: var(--muted); }
+.caselist { display: grid; gap: 6px; }
+.caseitem { text-align: left; border: 1px solid transparent; background: transparent; border-radius: var(--r); padding: 9px 10px; display: grid; gap: 3px; }
+.caseitem:hover { background: var(--surface-2); }
+.caseitem.active { background: var(--bg); border-color: var(--line); box-shadow: var(--shadow); }
+.caseitem .t { font-weight: 700; font-size: 13.5px; }
+.caseitem .m { font-size: 12px; color: var(--muted); display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.empty-note { font-size: 12.5px; color: var(--muted); margin: 0; }
+
+/* Chips and states */
+.chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 999px; padding: 2px 9px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.s-found, .o-pass { background: var(--pass-soft); color: var(--pass); }
+.s-notpresent, .o-fail { background: var(--fail-soft); color: var(--fail); }
+.s-notconfident, .o-amber { background: var(--amber-soft); color: var(--amber); }
+.s-na, .o-na { background: var(--surface-2); color: var(--muted); }
+.o-unclear { background: var(--info-soft); color: var(--info); }
+.status { background: var(--surface-2); color: var(--ink); }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.dot.ok { background: var(--pass); } .dot.warn { background: var(--amber); } .dot.bad { background: var(--fail); }
+.ref { border: 1px solid var(--line); background: var(--surface); color: var(--ink); border-radius: 5px; padding: 0 6px; font-size: 11.5px; font-weight: 700; font-family: var(--mono); vertical-align: 1px; }
+.ref:hover { border-color: var(--accent); color: var(--accent); }
+
+/* Welcome */
+.welcome { max-width: 780px; display: grid; gap: 18px; }
+.welcome h1 { font-size: 28px; font-weight: 800; letter-spacing: -.02em; }
+.welcome p { margin: 0; max-width: 64ch; color: var(--muted); font-size: 15px; }
+.steps { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 700px) { .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.step { border-top: 3px solid var(--accent); background: var(--surface); padding: 12px; border-radius: 0 0 var(--r) var(--r); }
+.step b { display: block; font-size: 13.5px; margin-bottom: 4px; }
+.step span { font-size: 12.5px; color: var(--muted); }
+
+/* Case */
+.casehead { display: grid; gap: 12px; margin-bottom: 16px; }
+.casehead h1 { font-size: 22px; font-weight: 800; letter-spacing: -.01em; }
+.casehead .sub { color: var(--muted); font-size: 13px; }
+.figures { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.figures > div { padding: 10px 12px; border-right: 1px solid var(--line); min-width: 0; }
+.figures > div:last-child { border-right: 0; }
+.figures .k { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+.figures .v { font-size: 17px; font-weight: 800; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.figures .v small { font-size: 12px; font-weight: 600; color: var(--muted); }
+@media (max-width: 1000px) { .figures { grid-template-columns: repeat(3, minmax(0, 1fr)); } .figures > div:nth-child(3n) { border-right: 0; } .figures > div:nth-child(-n+3) { border-bottom: 1px solid var(--line); } }
+.tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line); overflow-x: auto; margin-bottom: 18px; }
+.tab { border: 0; background: none; padding: 10px 14px; font-weight: 700; color: var(--muted); border-bottom: 3px solid transparent; white-space: nowrap; }
+.tab[aria-selected="true"] { color: var(--ink); border-bottom-color: var(--accent); }
+.tab .count { font-size: 11px; background: var(--surface-2); border-radius: 999px; padding: 1px 6px; margin-left: 4px; }
+.panel { display: grid; gap: 16px; }
+.card { border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); padding: 16px; display: grid; gap: 10px; min-width: 0; }
+.card h2 { font-size: 15px; font-weight: 800; }
+.card .hint { color: var(--muted); font-size: 12.5px; margin: 0; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) { .grid2 { grid-template-columns: 1fr; } }
+
+.rec { border: 1px solid var(--line); border-left: 6px solid var(--muted); border-radius: var(--r); padding: 16px; display: grid; gap: 10px; background: var(--bg); }
+.rec.approve { border-left-color: var(--pass); } .rec.decline { border-left-color: var(--fail); } .rec.more { border-left-color: var(--amber); } .rec.escalate { border-left-color: var(--info); }
+.rec .title { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.rec .title b { font-size: 18px; font-weight: 800; }
+.rec ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.rec .small { font-size: 12.5px; color: var(--muted); margin: 0; }
+
+.run { display: grid; gap: 8px; }
+.runstep { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; }
+.runstep .ic { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; font-size: 11px; font-weight: 800; }
+.runstep.done .ic { background: var(--pass); border-color: var(--pass); color: #fff; }
+.runstep.active .ic { border-color: var(--accent); border-top-color: transparent; animation: spin 1s linear infinite; }
+.runstep.error .ic { background: var(--fail); border-color: var(--fail); color: #fff; }
+.runstep b { font-size: 13.5px; }
+.runstep div span { display: block; font-size: 12.5px; color: var(--muted); }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .runstep.active .ic { animation: none; } }
+
+table.t { width: 100%; border-collapse: collapse; font-size: 13px; }
+table.t th { text-align: left; font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 700; padding: 8px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.t td { padding: 9px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.t tr.group td { background: var(--surface); font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding-block: 6px; }
+.tablewrap { overflow-x: auto; }
+.fv { font-weight: 700; font-variant-numeric: tabular-nums; }
+.note { font-size: 12px; color: var(--muted); }
+.flagrow { display: grid; gap: 4px; padding: 10px 12px; border-radius: var(--r); background: var(--amber-soft); }
+.flagrow b { color: var(--amber); }
+.flagrow.red { background: var(--fail-soft); } .flagrow.red b { color: var(--fail); }
+.edit-inline { display: flex; gap: 6px; flex-wrap: wrap; }
+.edit-inline input { border: 1px solid var(--line); border-radius: 6px; padding: 4px 8px; min-width: 0; width: 180px; background: var(--bg); }
+
+.memo-sec { border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 8px; }
+.memo-sec header { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.memo-sec h3 { font-size: 15px; font-weight: 800; }
+.memo-sec .by { font-size: 12px; color: var(--muted); }
+.memo-sec header .grow { flex: 1; }
+.memo-body { max-width: 78ch; font-size: 14px; }
+.memo-body p { margin: 0 0 8px; }
+.memo-body ul { margin: 0 0 8px; padding-left: 20px; }
+.memo-sec textarea, .field textarea { width: 100%; min-height: 160px; border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: var(--bg); line-height: 1.5; }
+.stale { background: var(--amber-soft); border-radius: var(--r); padding: 10px 12px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; }
+
+.field { display: grid; gap: 6px; }
+.field label { font-weight: 700; font-size: 13px; }
+.field select, .field input[type="text"] { border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; background: var(--bg); width: 100%; }
+.choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 600px) { .choices { grid-template-columns: 1fr; } }
+.choice { border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; display: flex; gap: 8px; align-items: flex-start; }
+.choice.disabled { opacity: .5; }
+.choice small { display: block; color: var(--muted); font-size: 12px; }
+.decided { border: 1px solid var(--line); border-left: 6px solid var(--accent); border-radius: var(--r); padding: 14px 16px; display: grid; gap: 6px; }
+.audit li { display: grid; grid-template-columns: 70px 150px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.audit { list-style: none; margin: 0; padding: 0; }
+.audit .who { font-weight: 700; }
+.audit .who.agent { color: var(--info); }
+@media (max-width: 600px) { .audit li { grid-template-columns: 60px minmax(0, 1fr); } .audit li .what { grid-column: 1 / -1; } }
+.errbox { background: var(--fail-soft); color: var(--ink); border-radius: var(--r); padding: 10px 12px; font-size: 13px; }
+.errbox b { color: var(--fail); }
+
+/* Modal */
+.modal { position: fixed; inset: 0; z-index: 20; background: rgba(20, 5, 8, .45); display: grid; place-items: center;
+  padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.dialog { background: var(--bg); border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.25); width: min(760px, 100%); max-height: 100%; overflow: auto; padding: 20px; display: grid; gap: 14px; }
+.dialog header { display: flex; gap: 10px; align-items: center; }
+.dialog header h2 { font-size: 17px; font-weight: 800; flex: 1; }
+.pagetext { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 14px; white-space: pre-wrap; font-size: 13px; line-height: 1.6; max-height: 60vh; overflow: auto; overflow-wrap: anywhere; }
+.pagetext mark { background: var(--hl); color: var(--ink); border-radius: 3px; padding: 0 2px; }
+.pageimg { max-width: 100%; border: 1px solid var(--line); border-radius: var(--r); }
+.settings-grid { display: grid; gap: 12px; }
+.provider-opts { display: grid; gap: 8px; }
+.provider-opts label.choice { cursor: pointer; }
+.cfg { display: grid; gap: 8px; padding: 10px 12px; background: var(--surface); border-radius: var(--r); }
+.cfg input { border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; background: var(--bg); width: 100%; font-family: var(--mono); font-size: 12.5px; }
+.cfg label { font-size: 12.5px; font-weight: 700; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row.end { justify-content: flex-end; }
+.toast { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 8px; font-weight: 700; font-size: 13px; z-index: 30; }
+</style>
+
+<header class="topbar">
+  <div class="brand"><b>NashFlow</b><span>Deal processor prototype</span></div>
+  <div class="spacer"></div>
+  <span class="pill-provider" id="providerPill">AI: checking</span>
+  <button class="btn-top" id="openSettings" type="button">Settings</button>
+</header>
+<div class="notice"><strong>Prototype.</strong> Use made-up or anonymised deal packs only. Documents are sent to the AI provider shown above. The agents prepare the case; a person makes every credit decision.</div>
+
+<div class="shell">
+  <aside>
+    <section style="display:grid;gap:8px">
+      <div class="label">New case</div>
+      <div class="drop" id="drop">
+        <p>Drop the deal pack here: broker email, valuation, tenancy schedule, accounts. PDF, Word, Excel, text or images.</p>
+        <div><button class="btn primary" id="pickBtn" type="button">Choose files</button></div>
+        <input type="file" id="fileInput" multiple hidden accept=".pdf,.txt,.eml,.md,.csv,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.webp">
+      </div>
+    </section>
+    <section style="display:grid;gap:8px">
+      <div class="label">Sample packs (fictional)</div>
+      <div class="samples" id="samples"></div>
+    </section>
+    <section style="display:grid;gap:8px">
+      <div class="label">My cases</div>
+      <div class="caselist" id="caselist"></div>
+    </section>
+  </aside>
+  <main id="main"></main>
+</div>
+
+<div class="modal" id="sourceModal" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="srcTitle">
+    <header><h2 id="srcTitle">Source</h2><button class="btn small" type="button" data-close>Close</button></header>
+    <div class="row" id="srcNav"></div>
+    <div id="srcBody"></div>
+  </div>
+</div>
+
+<div class="modal" id="settingsModal" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+    <header><h2 id="setTitle">Settings: AI provider</h2><button class="btn small" type="button" data-close>Close</button></header>
+    <p class="hint" style="margin:0;color:var(--muted)">Keys are saved in this browser only and sent only to the provider you choose. Inside the NashFlow link, only "Claude (built in)" can be used, because the page cannot reach other sites. The other providers work when you open the downloaded copy of this page from your computer.</p>
+    <div class="provider-opts" id="providerOpts"></div>
+    <div class="row end"><button class="btn primary" id="saveSettings" type="button">Save settings</button></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script>
+"use strict";
+const SAMPLES = /*__SAMPLES__*/null;
+
+/* ------------------------------------------------------------------ helpers */
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = (n) => (n == null || !isFinite(n) ? "-" : "£" + Math.round(n).toLocaleString("en-GB"));
+const pct = (n, d = 1) => (n == null || !isFinite(n) ? "-" : n.toFixed(d) + "%");
+const times = (n) => (n == null || !isFinite(n) ? "-" : n.toFixed(2) + "x");
+const nowISO = () => new Date().toISOString();
+const timeOf = (iso) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+const dateOf = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const uid = () => Math.random().toString(36).slice(2, 10);
+function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch (e) { return false; } }
+function load(key, dflt) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : dflt; } catch (e) { return dflt; } }
+function toast(msg) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 2400); }
+function parseNum(v) {
+  if (v == null) return null;
+  if (typeof v === "number") return isFinite(v) ? v : null;
+  let s = String(v).toLowerCase().replace(/,/g, "").replace(/£|gbp|pa|per annum|p\.a\./g, "").trim();
+  let mult = 1;
+  if (/\d\s*m\b/.test(s) || /million/.test(s)) mult = 1e6; else if (/\d\s*k\b/.test(s)) mult = 1e3;
+  const m = s.match(/-?\d+(\.\d+)?/);
+  return m ? parseFloat(m[0]) * mult : null;
+}
+function parseDate(v) {
+  if (!v) return null;
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+function b64ToBytes(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+function parseJSONLoose(text) {
+  if (text && typeof text === "object") return text;
+  let t = String(text || "").trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) t = fence[1].trim();
+  try { return JSON.parse(t); } catch (e) {}
+  const a = t.indexOf("{"), b = t.lastIndexOf("}");
+  if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e) {} }
+  throw new Error("The AI reply could not be read as data. Try running the agents again.");
+}
+
+/* ------------------------------------------------------------------ policy (illustrative, flow doc v0.6 section 7.1) */
+const POLICY = {
+  name: "Illustrative policy (UK market standard)",
+  version: "Flow doc v0.6, section 7.1",
+  minLoan: 250000, maxLoan: 10000000, minTerm: 3, maxTermIO: 15, maxTermAmort: 25,
+  maxLTV: 70, maxLTVSingle: 65, minICR: 1.5, stressRate: 6.5, minDSCR: 1.25,
+  minWAULT: 3, concentration: 50, accountsMonths: 12, uwLimit: 1000000,
+};
+const JUDGEMENT_AREAS = [
+  { area: "Property type", clause: "7.1 Property type", rule: "Retail, office, industrial and mixed use. Specialist uses (for example petrol stations, hotels) by exception." },
+  { area: "Borrower", clause: "7.1 Borrower", rule: "UK limited company or SPV, with personal guarantees from principal directors." },
+  { area: "Tenant covenant", clause: "7.1 Income quality", rule: "Tenant covenant strength and quality of income." },
+  { area: "Experience", clause: "7.1 Experience", rule: "Borrower or directors have relevant property investment experience." },
+  { area: "Adverse credit", clause: "7.1 Adverse credit", rule: "No unsatisfied CCJs or insolvency events; explained historic adverse considered." },
+];
+
+/* ------------------------------------------------------------------ fields (requirements v1.0, BR-01 and section 7.1) */
+const FIELDS = [
+  { key: "broker", label: "Broker", group: "Application" },
+  { key: "purpose", label: "Purpose", group: "Application", hint: "Refinance, Purchase or Capital raise" },
+  { key: "loan_amount", label: "Loan amount", group: "Application", type: "money", mandatory: true },
+  { key: "loan_term_years", label: "Loan term (years)", group: "Application", type: "num", mandatory: true },
+  { key: "repayment_basis", label: "Repayment basis", group: "Application", hint: "Interest only or Amortising" },
+  { key: "interest_rate_pct", label: "Proposed pay rate (%)", group: "Application", type: "num" },
+  { key: "owned_by_borrower", label: "Property already owned by borrower", group: "Application", mandatory: true, hint: "Yes or No" },
+  { key: "purchase_price", label: "Purchase price", group: "Application", type: "money", mandatoryIf: "purchase" },
+  { key: "existing_debt", label: "Existing debt to repay", group: "Application", type: "money", hint: "amount owed to the current lender, from a redemption statement, accounts or the broker" },
+  { key: "borrower_name", label: "Borrower", group: "Borrower", mandatory: true },
+  { key: "company_number", label: "Company number", group: "Borrower" },
+  { key: "registered_address", label: "Registered address", group: "Borrower" },
+  { key: "directors", label: "Directors and guarantors", group: "Borrower" },
+  { key: "experience", label: "Property investment experience", group: "Borrower" },
+  { key: "adverse_credit", label: "Adverse credit", group: "Borrower" },
+  { key: "accounts_year_end", label: "Latest accounts year end", group: "Borrower", type: "date" },
+  { key: "property_address", label: "Property address", group: "Property", mandatory: true },
+  { key: "property_country", label: "Country", group: "Property", hint: "England, Wales, Scotland, Northern Ireland or Outside UK" },
+  { key: "property_type", label: "Property type", group: "Property" },
+  { key: "tenure", label: "Tenure", group: "Property" },
+  { key: "property_value", label: "Property value", group: "Property", type: "money", mandatory: true },
+  { key: "value_basis", label: "Value basis", group: "Property", hint: "Valuation or Broker estimate" },
+  { key: "valuation_date", label: "Valuation date", group: "Property", type: "date" },
+  { key: "valuer", label: "Valuer", group: "Property" },
+  { key: "epc_rating", label: "EPC rating", group: "Property" },
+  { key: "floor_area_sqft", label: "Floor area (sq ft)", group: "Property", type: "num", hint: "total net or gross area in square feet" },
+  { key: "market_rent", label: "Market rent (ERV)", group: "Income", type: "money", hint: "valuer's estimated rental value per year" },
+  { key: "valuation_yield_pct", label: "Valuation yield (%)", group: "Income", type: "num", hint: "net initial or equivalent yield stated by the valuer, number e.g. 7.6" },
+  { key: "annual_rent", label: "Annual passing rent", group: "Income", type: "money", mandatory: true },
+];
+const FIELD = Object.fromEntries(FIELDS.map((f) => [f.key, f]));
+const NUMERIC = new Set(["loan_amount", "loan_term_years", "interest_rate_pct", "purchase_price", "property_value", "annual_rent", "existing_debt", "floor_area_sqft", "market_rent", "valuation_yield_pct"]);
+/* BR-03: the value used comes from the strongest source */
+const PRIORITY = {
+  property_value: ["Valuation report"],
+  valuation_date: ["Valuation report"],
+  annual_rent: ["Tenancy schedule", "Lease", "Valuation report"],
+  loan_amount: ["Application form", "Broker email"],
+  loan_term_years: ["Application form", "Broker email"],
+  interest_rate_pct: ["Application form", "Broker email"],
+  purchase_price: ["Application form", "Broker email", "Sales particulars"],
+  company_number: ["Companies House", "Accounts", "Application form"],
+  borrower_name: ["Companies House", "Application form", "Accounts"],
+  epc_rating: ["EPC certificate", "Valuation report"],
+  market_rent: ["Valuation report"],
+  valuation_yield_pct: ["Valuation report"],
+  floor_area_sqft: ["Valuation report", "Tenancy schedule"],
+  existing_debt: ["Redemption statement", "Application form", "Broker email"],
+};
+const STATES = ["Found", "Not present", "Not confident", "Not applicable"];
+const stateClass = (s) => ({ "Found": "s-found", "Not present": "s-notpresent", "Not confident": "s-notconfident", "Not applicable": "s-na" }[s] || "s-na");
+
+/* ------------------------------------------------------------------ settings and AI providers */
+const PROVIDERS = {
+  "claude-builtin": { name: "Claude (built in)", desc: "Uses your Claude account through this page. No key needed. Works inside the NashFlow link." },
+  "gemini": { name: "Google Gemini", desc: "Free key from aistudio.google.com. Works in the downloaded copy. On the free tier Google may use what you send to improve its models." },
+  "claude-api": { name: "Claude API", desc: "Anthropic API key. Works in the downloaded copy." },
+  "azure": { name: "Azure OpenAI", desc: "Your Azure OpenAI resource, for example NashTech's own. Works in the downloaded copy." },
+};
+let settings = Object.assign({ provider: "auto", geminiKey: "", geminiModel: "gemini-2.5-flash", claudeKey: "", claudeModel: "claude-sonnet-5-5", azureEndpoint: "", azureDeployment: "", azureKey: "", azureVersion: "2024-10-21" }, load("nashflow.settings", {}));
+let sampleFn = null;
+let sampleChecked = false;
+(async () => {
+  try { if (window.claude && typeof window.claude.use === "function") sampleFn = await window.claude.use("sample"); } catch (e) { sampleFn = null; }
+  sampleChecked = true; renderProviderPill();
+})();
+setTimeout(() => { if (!sampleChecked) { sampleChecked = true; renderProviderPill(); } }, 11000);
+if (!(window.claude && window.claude.use)) { sampleChecked = true; }
+
+function activeProvider() {
+  if (settings.provider && settings.provider !== "auto") return settings.provider;
+  return sampleFn ? "claude-builtin" : "gemini";
+}
+function renderProviderPill() {
+  const p = activeProvider();
+  let label = PROVIDERS[p].name;
+  if (p === "gemini") label += settings.geminiKey ? "" : " (add key in Settings)";
+  if (p === "claude-builtin" && !sampleFn && sampleChecked) label += " (not available here)";
+  $("#providerPill").textContent = "AI: " + label;
+}
+
+async function askAI(prompt, images, purpose) {
+  if (window.__testAI) return window.__testAI(prompt, images, purpose);
+  const p = activeProvider();
+  if (p === "claude-builtin") {
+    if (!sampleFn) throw new Error("Claude (built in) only works inside the NashFlow link on claude.ai. Open Settings to choose another provider.");
+    const opts = { modelTier: purpose === "memo" ? "complex" : "default", cache: false };
+    const lim0 = await sampleFn.limits().catch(() => null);
+    if (lim0 && Array.isArray(lim0.modelTiers) && !lim0.modelTiers.includes(opts.modelTier)) opts.modelTier = "default";
+    if (images.length) {
+      const lim = await sampleFn.limits().catch(() => null);
+      if (lim && lim.images) opts.images = images.slice(0, lim.images.maxCount || 10).map((im) => new Blob([b64ToBytes(im.b64)], { type: im.mime }));
+    }
+    try { return await sampleFn.json(prompt, opts); }
+    catch (e0) {
+      let e = e0;
+      if (opts.modelTier !== "default" && !["not_granted", "rate_limited", "cancelled", "prompt_too_large"].includes(e0 && e0.code)) {
+        try { return await sampleFn.json(prompt, Object.assign({}, opts, { modelTier: "default" })); } catch (e1) { e = e1; }
+      }
+      const why = { not_granted: "Claude was not allowed for this page. Reload and choose Allow when asked.", rate_limited: "Too many requests just now. Wait a minute and run again.", prompt_too_large: "The deal pack is too large. Remove a document and try again.", invalid_json: "The reply could not be read as data. Run the agents again." }[e && e.code];
+      throw new Error(why || (e && e.message) || "Claude did not answer.");
+    }
+  }
+  if (p === "gemini") {
+    if (!settings.geminiKey) throw new Error("Add your Gemini key in Settings first (free from aistudio.google.com).");
+    const parts = [{ text: prompt }].concat(images.map((im) => ({ inline_data: { mime_type: im.mime, data: im.b64 } })));
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.geminiModel)}:generateContent`, {
+      method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": settings.geminiKey },
+      body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0.1, responseMimeType: "application/json" } }),
+    }).catch(() => { throw new Error("Could not reach Google. Gemini works in the downloaded copy of this page, not inside the NashFlow link."); });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(res.status === 429 ? "Gemini free tier limit reached. Wait a minute and run again." : "Gemini said: " + ((data.error && data.error.message) || res.status));
+    const text = (data.candidates?.[0]?.content?.parts || []).map((x) => x.text || "").join("");
+    return parseJSONLoose(text);
+  }
+  if (p === "claude-api") {
+    if (!settings.claudeKey) throw new Error("Add your Claude API key in Settings first.");
+    const content = images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.mime, data: im.b64 } })).concat([{ type: "text", text: prompt }]);
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": settings.claudeKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: settings.claudeModel, max_tokens: 16000, messages: [{ role: "user", content }] }),
+    }).catch(() => { throw new Error("Could not reach the Claude API. It works in the downloaded copy of this page, not inside the NashFlow link."); });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error("Claude API said: " + ((data.error && data.error.message) || res.status));
+    return parseJSONLoose((data.content || []).map((x) => x.text || "").join(""));
+  }
+  if (p === "azure") {
+    if (!settings.azureEndpoint || !settings.azureDeployment || !settings.azureKey) throw new Error("Add the Azure endpoint, deployment and key in Settings first.");
+    const content = [{ type: "text", text: prompt }].concat(images.map((im) => ({ type: "image_url", image_url: { url: `data:${im.mime};base64,${im.b64}` } })));
+    const url = `${settings.azureEndpoint.replace(/\/$/, "")}/openai/deployments/${encodeURIComponent(settings.azureDeployment)}/chat/completions?api-version=${encodeURIComponent(settings.azureVersion)}`;
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "api-key": settings.azureKey },
+      body: JSON.stringify({ messages: [{ role: "user", content }], temperature: 0.1, response_format: { type: "json_object" } }) })
+      .catch(() => { throw new Error("Could not reach Azure. It works in the downloaded copy of this page, not inside the NashFlow link."); });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error("Azure said: " + ((data.error && data.error.message) || res.status));
+    return parseJSONLoose(data.choices?.[0]?.message?.content || "");
+  }
+  throw new Error("No AI provider chosen.");
+}
+
+/* ------------------------------------------------------------------ document intake */
+const loaded = {};
+function loadScript(src) {
+  if (loaded[src]) return loaded[src];
+  loaded[src] = new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => rej(new Error("Could not load a reader for this file type.")); document.head.append(s); });
+  return loaded[src];
+}
+async function readFile(file) {
+  const name = file.name; const lower = name.toLowerCase();
+  const doc = { name, pages: [], images: [] };
+  if (lower.endsWith(".pdf") || file.type === "application/pdf") {
+    const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const tc = await page.getTextContent();
+      let text = tc.items.map((it) => it.str + (it.hasEOL ? "\n" : " ")).join("").replace(/[ \t]+/g, " ").replace(/ \n/g, "\n").trim();
+      doc.pages.push(text);
+      if (text.replace(/\s/g, "").length < 25) {
+        const vp = page.getViewport({ scale: 1.6 });
+        const canvas = document.createElement("canvas"); canvas.width = vp.width; canvas.height = vp.height;
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+        doc.images.push({ page: i, mime: "image/jpeg", b64: canvas.toDataURL("image/jpeg", 0.85).split(",")[1] });
+        doc.pages[i - 1] = "[Scanned page with no text layer. Read from the image.]";
+      }
+    }
+  } else if (lower.endsWith(".docx")) {
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js");
+    const r = await window.mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    doc.pages.push(r.value.trim());
+  } else if (/\.(xlsx|xls)$/.test(lower)) {
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+    const wb = window.XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
+    wb.SheetNames.forEach((sn) => doc.pages.push("Sheet: " + sn + "\n" + window.XLSX.utils.sheet_to_csv(wb.Sheets[sn])));
+  } else if (/\.(png|jpe?g|webp)$/.test(lower) || (file.type || "").startsWith("image/")) {
+    const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1]); fr.readAsDataURL(file); });
+    doc.images.push({ page: 1, mime: file.type || "image/jpeg", b64 });
+    doc.pages.push("[Image. Read from the image.]");
+  } else {
+    doc.pages.push((await file.text()).trim());
+  }
+  return doc;
+}
+
+/* ------------------------------------------------------------------ state */
+let cases = load("nashflow.cases.v1", []);
+const memImages = {}; // case id -> images (not saved to browser storage)
+let currentId = load("nashflow.current", null);
+let currentTab = "summary";
+function save() {
+  if (!store("nashflow.cases.v1", cases)) toast("This browser could not save the cases. They will be lost on reload.");
+  store("nashflow.current", currentId);
+}
+const cur = () => cases.find((c) => c.id === currentId);
+function audit(c, who, what, kind = "human") { c.audit.push({ at: nowISO(), who, what, kind }); }
+
+async function newCaseFromFiles(files, title) {
+  const c = { id: uid(), createdAt: nowISO(), title: title || "New case", status: "New (being read by agents)", docs: [], audit: [], run: null, fields: null, tenants: [], checks: [], consistency: [], judgements: [], memo: null, rec: null, decision: null };
+  cases.unshift(c); currentId = c.id; currentTab = "summary";
+  memImages[c.id] = [];
+  render();
+  let i = 0;
+  for (const f of files) {
+    i++;
+    try {
+      const d = await readFile(f);
+      d.id = "D" + i;
+      d.images.forEach((im) => memImages[c.id].push(Object.assign({ doc: d.id }, im)));
+      d.imagePages = d.images.map((im) => im.page);
+      delete d.images;
+      c.docs.push(d);
+      audit(c, "Intake agent", `Read ${d.id} "${d.name}" (${d.pages.length} page${d.pages.length > 1 ? "s" : ""})`, "agent");
+    } catch (e) {
+      audit(c, "Intake agent", `Could not read "${f.name}": ${e.message}`, "agent");
+    }
+  }
+  save(); render();
+  runAgents(c);
+}
+
+/* ------------------------------------------------------------------ prompts */
+function docsBlock(c) {
+  return c.docs.map((d) => `=== DOCUMENT ${d.id}: "${d.name}" ===\n` + d.pages.map((p, i) => `--- ${d.id} page ${i + 1} ---\n${p}`).join("\n")).join("\n\n");
+}
+function extractPrompt(c, imgs) {
+  const fieldList = FIELDS.map((f) => `- ${f.key}: ${f.label}${f.hint ? " (" + f.hint + ")" : ""}${f.type === "money" ? " (number in pounds, no symbols)" : ""}${f.type === "date" ? " (YYYY-MM-DD)" : ""}${f.key === "interest_rate_pct" ? " (number, e.g. 7.25)" : ""}`).join("\n");
+  const imgNote = imgs.length ? "\nImages attached, in order: " + imgs.map((im, i) => `image ${i + 1} = ${im.doc} page ${im.page}`).join("; ") + ".\n" : "";
+  return `You are the extraction agent in NashFlow, a commercial property lending tool used by a UK specialist lender. Read the broker's deal pack below and extract the application fields with their sources. Today is ${new Date().toISOString().slice(0, 10)}.
+
+Rules:
+- Use only what the documents say. Never guess or fill in a value that is not there.
+- Every field gets one state: "Found" (found with good confidence), "Not present" (expected but not in any document), "Not confident" (found but a person should check it, for example vague, approximate, conflicting wording or hard to read), "Not applicable" (does not apply, for example purchase_price on a refinance, or valuation_date when there is no valuation).
+- For Found and Not confident, give the source: document id, page number, and a short exact quote (copy 3 to 12 words exactly as written in the document so it can be highlighted).
+- If the same field appears in more than one document, put the other occurrences in "others", even when they agree. This is used to check consistency. Include the broker email's figures as well as the formal documents' figures.
+- annual_rent is the current passing rent actually payable, not estimated rental value of vacant space.
+- property_country is inferred from the address and postcode.
+- A broker's rough figure ("around", "about", "we think") is Not confident unless a formal document confirms it. value_basis is "Broker estimate" when there is no valuation report.
+- Classify each document as one of: Broker email, Application form, Valuation report, Tenancy schedule, Lease, Accounts, Sales particulars, Companies House, EPC certificate, Redemption statement, Sponsor statement, Other. Give its date if shown.
+- List every tenant from a tenancy schedule or lease with annual rent (number), lease_end and break_date (YYYY-MM-DD, or null with a note if not clear). Exclude vacant units.
+${imgNote}
+Fields:
+${fieldList}
+
+Reply with only this JSON:
+{
+ "documents": [{"id": "D1", "type": "Broker email", "date": "YYYY-MM-DD or null", "summary": "one line"}],
+ "fields": {
+   "<field key>": {"state": "Found", "value": "...", "source": {"doc": "D1", "page": 1, "quote": "exact words"}, "note": "short reason if not Found", "others": [{"value": "...", "doc": "D2", "page": 1, "quote": "exact words"}]}
+ },
+ "tenants": [{"name": "...", "annual_rent": 0, "lease_end": "YYYY-MM-DD or null", "break_date": "YYYY-MM-DD or null", "note": "", "source": {"doc": "D3", "page": 1, "quote": "exact words"}}]
+}
+Include every field key listed above in "fields".
+
+DEAL PACK
+${docsBlock(c)}`;
+}
+function memoPrompt(c) {
+  const fieldsOut = {};
+  FIELDS.forEach((f) => { const x = c.fields[f.key]; fieldsOut[f.key] = { state: x.state, value: x.value, source: x.source ? `[${x.source.doc} p${x.source.page}]` : null }; });
+  const checks = c.checks.map((k) => ({ area: k.area, rule: k.rule, result: k.value, outcome: k.outcome, flag: k.flag, why: k.why }));
+  const sens = (c.analysis || []).map((a) => ({ measure: a.label, value: a.value, comment: a.note }));
+  return `You are the memo agent in NashFlow, a commercial property lending tool for a UK specialist lender. Write as an experienced UK commercial real estate credit analyst preparing a credit paper for an Underwriter or Credit Committee. The agents assist; a person decides.
+
+How to write:
+- The reader is a credit professional. Be analytical, not descriptive: after each fact, say what it means for the credit (security, income, cover, sponsor, exit). No padding, no marketing language.
+- Plain UK English. Do not use em dashes. Use market terms correctly: passing rent, ERV, reversion, WAULT to expiry and to break, net initial yield, capital value per sq ft, debt yield, ICR, DSCR, LTV, FRI lease, MEES, first legal charge, personal guarantee, conditions precedent and subsequent.
+- Use only facts in the deal pack and the calculated figures. Never invent tenant covenants, credit scores, market evidence, comparables or rates. Where the pack is silent, say so and say what the underwriter should obtain.
+- Cite every figure taken from a document straight after it as [D2 p1], one source per bracket. Mark figures from CALCULATED CHECKS or SENSITIVITIES as (calculated). Do not recalculate or contradict calculated figures.
+- Within a section you may use short paragraphs, "**Label**" lines and "- " bullet lines. Put a blank line between paragraphs and lists.
+
+Tasks:
+1. Assess these judgement areas against the policy, each with outcome "Pass", "Fail" or "Unclear", the evidence and a one-sentence explanation. Use "Unclear" when the pack does not give enough to judge.
+${JUDGEMENT_AREAS.map((j) => `   - ${j.area}: ${j.rule}`).join("\n")}
+2. Draft these credit memo sections:
+   - summary (150 to 220 words): the deal in one sentence; the three or four points that drive the credit; the main risk and its mitigant; the suggested recommendation (${c.rec ? c.rec.label : "see checks"}) and that ${c.rec ? c.rec.approver : "the approver"} decides.
+   - proposal: facility, purpose and use of funds (amount repaid to the existing lender, any equity release, fees if given), term, repayment basis, pay rate, security and guarantees, LTV, ICR, DSCR if amortising, debt yield. A short paragraph, then a "- " list of key terms.
+   - borrower: legal entity and incorporation, ownership and persons with significant control, directors and guarantors, track record and portfolio, financial strength from the accounts (rental income trend, profit, net assets, gearing, cash), Companies House points (status, charges, filings). Judge guarantor strength only from evidence.
+   - property: location and micro-location, type and specification, age and condition, tenure, EPC and MEES implications, alternative uses, and how liquid the asset is as security.
+   - valuation: valuer, date and basis, market value, capital value per sq ft, passing rent against ERV and the reversion, yield (the valuer's if given, otherwise the calculated implied yield), comparables if given and whether the value looks supported, the valuer's view on suitability, and reliance points (age of the valuation, who instructed it, need for a lender-instructed RICS valuation).
+   - income: one "- " line per tenant (tenant, rent and share of total, lease end and break, covenant comment from evidence only), then WAULT to expiry and to break, rent at risk from lease events within the loan term, concentration, vacancy, arrears and reversion potential.
+   - financial_analysis: LTV, ICR at the pay rate and under stress, DSCR if amortising, debt yield and the sensitivities, with headroom against policy, and what the accounts show. One or two paragraphs, then "- " lines for each red or amber flag with the reason.
+   - exit: how the loan is repaid at maturity (refinance or sale), whether the asset should be refinanceable then given lease events before maturity and the LTV and ICR at maturity, and what could stop it.
+   - risks: 5 to 8 "- Risk: ... Mitigant: ..." lines, most important first, specific to this deal.
+   - covenants: proposed financial covenants using the SENSITIVITIES (LTV and ICR levels with headroom), then information undertakings (annual accounts, quarterly rent roll, lender's right to revalue). Say the levels are proposed.
+   - conditions: a "**Conditions precedent**" list and a "**Conditions subsequent**" list, specific to this deal (for example lender-instructed RICS valuation, report on title, redemption statement, KYC and AML on directors and PSCs, personal guarantees with independent legal advice, buildings insurance with the lender noted, a new lease for a tenant holding over).
+3. broker_request: if anything is Not present, Not confident, out of date or inconsistent, draft one short polite email to the broker (first name) listing each item needed as "- " lines, signed "[Your name]". Otherwise "".
+
+Reply with only this JSON:
+{"judgements": [{"area": "Property type", "outcome": "Pass", "evidence": "short", "explanation": "one sentence", "source": {"doc": "D2", "page": 1}}],
+ "memo": {"summary": "", "proposal": "", "borrower": "", "property": "", "valuation": "", "income": "", "financial_analysis": "", "exit": "", "risks": "", "covenants": "", "conditions": ""},
+ "broker_request": ""}
+
+EXTRACTED FIELDS
+${JSON.stringify(fieldsOut, null, 1)}
+
+TENANTS
+${JSON.stringify(c.tenants.map((t) => ({ name: t.name, annual_rent: t.annual_rent, lease_end: t.lease_end, break_date: t.break_date, note: t.note })), null, 1)}
+
+CALCULATED CHECKS
+${JSON.stringify(checks, null, 1)}
+
+SENSITIVITIES (calculated)
+${JSON.stringify(sens, null, 1)}
+
+CONSISTENCY FLAGS
+${JSON.stringify(c.consistency.map((f) => f.text))}
+
+DEAL PACK
+${docsBlock(c)}`;
+}
+
+/* ------------------------------------------------------------------ normalise extraction */
+function normaliseExtraction(c, r) {
+  const docType = {};
+  (r.documents || []).forEach((d) => { docType[d.id] = d.type; const doc = c.docs.find((x) => x.id === d.id); if (doc) { doc.type = d.type; doc.date = d.date; doc.summary = d.summary; } });
+  const fields = {};
+  c.consistency = [];
+  FIELDS.forEach((f) => {
+    const raw = (r.fields || {})[f.key] || {};
+    let state = STATES.includes(raw.state) ? raw.state : (raw.value != null && raw.value !== "" ? "Found" : "Not present");
+    const cands = [];
+    if (raw.value != null && raw.value !== "" && state !== "Not present" && state !== "Not applicable") cands.push({ value: raw.value, doc: raw.source?.doc, page: raw.source?.page, quote: raw.source?.quote });
+    (raw.others || []).forEach((o) => { if (o && o.value != null && o.value !== "") cands.push({ value: o.value, doc: o.doc, page: o.page, quote: o.quote }); });
+    cands.forEach((k) => { k.docType = docType[k.doc] || ""; if (NUMERIC.has(f.key)) k.num = parseNum(k.value); });
+    let used = cands[0] || null;
+    const pr = PRIORITY[f.key];
+    if (pr && cands.length > 1) {
+      for (const t of pr) { const hit = cands.find((k) => k.docType === t); if (hit) { used = hit; break; } }
+    }
+    if (used && state === "Not present") state = "Found";
+    const field = { key: f.key, state, value: used ? (NUMERIC.has(f.key) ? used.num : used.value) : null, source: used && used.doc ? { doc: used.doc, page: used.page || 1, quote: used.quote || "" } : null, note: raw.note || "", candidates: cands };
+    if (NUMERIC.has(f.key) && used && used.num != null) {
+      const tol = f.type === "money" ? 0.01 : 0;
+      const diff = cands.filter((k) => k.num != null && Math.abs(k.num - used.num) > Math.abs(used.num) * tol + 1e-9);
+      if (diff.length) {
+        const fmt = (v) => (f.type === "money" ? money(v) : String(v));
+        c.consistency.push({ key: f.key, text: `${f.label}: ${[used].concat(diff).map((k) => `${fmt(k.num)} in ${k.docType || k.doc}`).join(" vs ")}. Using ${fmt(used.num)} from the ${used.docType || used.doc} (strongest source).`, cands: [used].concat(diff) });
+      }
+    }
+    fields[f.key] = field;
+  });
+  c.fields = fields;
+  c.tenants = (r.tenants || []).map((t) => ({ name: t.name, annual_rent: parseNum(t.annual_rent), lease_end: t.lease_end || null, break_date: t.break_date || null, note: t.note || "", source: t.source || null }));
+  applyNA(c);
+}
+function applyNA(c) {
+  const F = c.fields;
+  const owned = String(F.owned_by_borrower.value || "").toLowerCase();
+  const purpose = String(F.purpose.value || "").toLowerCase();
+  if ((owned.startsWith("y") || /refin|capital/.test(purpose)) && F.purchase_price.state !== "Found") { F.purchase_price.state = "Not applicable"; F.purchase_price.note = "Refinance, so no purchase price."; }
+  if (/estimate/i.test(String(F.value_basis.value || "")) && F.valuation_date.state !== "Found") { F.valuation_date.state = "Not applicable"; F.valuation_date.note = "No valuation yet; value is the broker's estimate."; }
+  if (/estimate/i.test(String(F.value_basis.value || "")) && F.valuer.state !== "Found") { F.valuer.state = "Not applicable"; F.valuer.note = "No valuation yet."; }
+}
+const usable = (c, k) => { const f = c.fields[k]; return f && (f.state === "Found" || f.state === "Not confident" || f.edited) && f.value != null && f.value !== "" ? f.value : null; };
+const num = (c, k) => { const v = usable(c, k); return v == null ? null : parseNum(v); };
+
+/* ------------------------------------------------------------------ calculated checks (BR-05: numeric limits are calculated, not judged by the AI) */
+function computeChecks(c) {
+  const P = POLICY; const checks = [];
+  const L = num(c, "loan_amount"), V = num(c, "property_value"), R = num(c, "annual_rent"), T = num(c, "loan_term_years"), rate = num(c, "interest_rate_pct");
+  const amort = /amort|capital|repay/i.test(String(usable(c, "repayment_basis") || "")) && !/interest only/i.test(String(usable(c, "repayment_basis") || ""));
+  const add = (o) => checks.push(Object.assign({ type: "Calculated", flag: null }, o));
+  const missing = (names) => `Cannot calculate: ${names} not available.`;
+
+  // Loan size
+  if (L == null) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: "-", outcome: "Unclear", why: missing("loan amount") });
+  else if (L > P.maxLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Above the £10m cap, so outside appetite.` });
+  else if (L < P.minLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Below the £250,000 minimum.` });
+  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: `Within the lending range.${L > P.uwLimit ? " Over £1m, so a Credit Committee decision." : ""}` });
+
+  // Term
+  const maxT = amort ? P.maxTermAmort : P.maxTermIO;
+  if (T == null) add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: "3 to 15 years (up to 25 if capital repayment)", value: "-", outcome: "Unclear", why: missing("loan term") });
+  else add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: "3 to 15 years (up to 25 if capital repayment)", value: T + " years", outcome: T >= P.minTerm && T <= maxT ? "Pass" : "Fail", flag: T >= P.minTerm && T <= maxT ? null : "red", why: T >= P.minTerm && T <= maxT ? `Within ${P.minTerm} to ${maxT} years.` : `Outside ${P.minTerm} to ${maxT} years.` });
+
+  // LTV
+  const single = c.tenants.length === 1;
+  const ltvMax = single ? P.maxLTVSingle : P.maxLTV;
+  if (L == null || V == null) add({ id: "ltv", area: "Loan to value", clause: "7.1 LTV", rule: `Up to ${P.maxLTV}% (${P.maxLTVSingle}% single-let or specialist)`, value: "-", outcome: "Unclear", why: missing([L == null ? "loan amount" : null, V == null ? "property value" : null].filter(Boolean).join(" and ")) });
+  else {
+    const ltv = (L / V) * 100; const pass = ltv <= ltvMax + 1e-9; const near = pass && ltv > ltvMax * 0.9;
+    const basis = /estimate/i.test(String(usable(c, "value_basis") || "")) ? " Value is the broker's estimate, so this needs a valuation." : "";
+    add({ id: "ltv", area: "Loan to value", clause: "7.1 LTV", rule: `Up to ${ltvMax}%${single ? " (single-let)" : ""}`, value: pct(ltv), metric: ltv, outcome: pass ? "Pass" : "Fail", flag: pass ? (near || basis ? "amber" : null) : "red",
+      why: `${money(L)} / ${money(V)} = ${pct(ltv)} against a ${ltvMax}% limit${pass ? (near ? ", within 10% of the limit." : ".") : `, ${(ltv - ltvMax).toFixed(1)} points over.`}${basis}` });
+  }
+
+  // ICR
+  const rUsed = Math.max(rate || 0, P.stressRate);
+  if (L == null || R == null) add({ id: "icr", area: "Interest cover (ICR)", clause: "7.1 ICR", rule: `At least ${P.minICR}x at the higher of pay rate or ${P.stressRate}% stress`, value: "-", outcome: "Unclear", why: missing([L == null ? "loan amount" : null, R == null ? "rental income" : null].filter(Boolean).join(" and ")) });
+  else {
+    const interest = (L * rUsed) / 100; const icr = R / interest; const pass = icr >= P.minICR; const near = pass && icr < P.minICR * 1.1;
+    add({ id: "icr", area: "Interest cover (ICR)", clause: "7.1 ICR", rule: `At least ${P.minICR}x`, value: times(icr), metric: icr, outcome: pass ? "Pass" : "Fail", flag: pass ? (near ? "amber" : null) : "red",
+      why: `Rent ${money(R)} / interest ${money(interest)} (${money(L)} at ${rUsed}%${rate == null ? ", stress rate as no pay rate given" : rate < P.stressRate ? ", stress rate" : ", pay rate"}) = ${times(icr)}.${near ? " Within 10% of the limit." : ""}` });
+  }
+
+  // DSCR
+  if (!amort) add({ id: "dscr", area: "Debt service cover (DSCR)", clause: "7.1 DSCR", rule: `At least ${P.minDSCR}x where the loan amortises`, value: "Not applicable", outcome: "N/A", why: "Interest only, so ICR applies." });
+  else if (L == null || R == null || T == null) add({ id: "dscr", area: "Debt service cover (DSCR)", clause: "7.1 DSCR", rule: `At least ${P.minDSCR}x`, value: "-", outcome: "Unclear", why: missing("loan, rent or term") });
+  else {
+    const m = rUsed / 100 / 12, n = T * 12; const annual = ((L * m) / (1 - Math.pow(1 + m, -n))) * 12; const d = R / annual; const pass = d >= P.minDSCR;
+    add({ id: "dscr", area: "Debt service cover (DSCR)", clause: "7.1 DSCR", rule: `At least ${P.minDSCR}x`, value: times(d), metric: d, outcome: pass ? "Pass" : "Fail", flag: pass ? (d < P.minDSCR * 1.1 ? "amber" : null) : "red", why: `Rent ${money(R)} / annual repayments ${money(annual)} = ${times(d)}.` });
+  }
+
+  // Location
+  const ctry = String(usable(c, "property_country") || "");
+  if (!ctry) add({ id: "loc", area: "Location", clause: "7.1 Location", rule: "England, Wales, Scotland or Northern Ireland", value: "-", outcome: "Unclear", why: missing("country") });
+  else { const uk = /england|wales|scotland|northern ireland|united kingdom|uk/i.test(ctry) && !/outside/i.test(ctry);
+    add({ id: "loc", area: "Location", clause: "7.1 Location", rule: "England, Wales, Scotland or Northern Ireland", value: ctry, outcome: uk ? "Pass" : "Fail", flag: uk ? null : "red", core: !uk, why: uk ? "In the UK." : "Outside the UK, so outside appetite." }); }
+
+  // EPC
+  const epc = String(usable(c, "epc_rating") || "").toUpperCase().match(/\b([A-G])\b/);
+  if (!epc) add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: "E or better", value: "-", outcome: "Unclear", why: "No EPC rating in the pack." });
+  else { const ok = "ABCDE".includes(epc[1]); add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: "E or better", value: epc[1], outcome: ok ? "Pass" : "Fail", flag: ok ? (epc[1] === "E" ? "amber" : null) : "red", why: ok ? `EPC ${epc[1]} meets minimum energy standards.` : `EPC ${epc[1]} is below E, so the property cannot lawfully be let without works.` }); }
+
+  // WAULT and concentration
+  const today = new Date();
+  const withRent = c.tenants.filter((t) => t.annual_rent > 0);
+  const dated = withRent.filter((t) => parseDate(t.lease_end));
+  if (!withRent.length) add({ id: "wault", area: "Unexpired lease term (WAULT)", clause: "7.1 Income quality", rule: `At least ${P.minWAULT} years`, value: "-", outcome: "Unclear", why: "No tenancy schedule or leases, so WAULT cannot be calculated." });
+  else if (!dated.length) add({ id: "wault", area: "Unexpired lease term (WAULT)", clause: "7.1 Income quality", rule: `At least ${P.minWAULT} years`, value: "-", outcome: "Unclear", why: "No lease end dates given." });
+  else {
+    const tot = dated.reduce((s, t) => s + t.annual_rent, 0);
+    const w = dated.reduce((s, t) => s + t.annual_rent * Math.max(0, (parseDate(t.lease_end) - today) / (365.25 * 864e5)), 0) / tot;
+    const excl = withRent.length - dated.length; const pass = w >= P.minWAULT;
+    add({ id: "wault", area: "Unexpired lease term (WAULT)", clause: "7.1 Income quality", rule: `At least ${P.minWAULT} years to expiry`, value: w.toFixed(1) + " years", metric: w, outcome: pass ? "Pass" : "Fail", flag: !pass ? "red" : excl || w < P.minWAULT * 1.1 ? "amber" : null,
+      why: `Rent-weighted to lease expiry across ${dated.length} tenant${dated.length > 1 ? "s" : ""}.${excl ? ` ${excl} tenant${excl > 1 ? "s have" : " has"} no lease end date and ${excl > 1 ? "are" : "is"} left out.` : ""}` });
+  }
+  if (withRent.length) {
+    const tot = withRent.reduce((s, t) => s + t.annual_rent, 0); const top = withRent.slice().sort((a, b) => b.annual_rent - a.annual_rent)[0]; const share = (top.annual_rent / tot) * 100;
+    add({ id: "conc", area: "Tenant concentration", clause: "7.1 Income quality", rule: `Flag where one tenant pays over ${P.concentration}% of rent`, value: pct(share, 0) + " largest", outcome: "Pass", flag: share > P.concentration ? "amber" : null, why: `${top.name} pays ${pct(share, 0)} of the rent.${share > P.concentration ? " Concentration risk." : ""}` });
+    const R2 = num(c, "annual_rent");
+    if (R2 != null && Math.abs(tot - R2) > R2 * 0.01 && !c.consistency.some((x) => x.key === "tenants_sum")) c.consistency.push({ key: "tenants_sum", text: `Tenant rents add up to ${money(tot)}, but the rent used is ${money(R2)}.` });
+  }
+
+  // Accounts age (BS-06)
+  const ye = parseDate(usable(c, "accounts_year_end"));
+  if (!ye) add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age (accounts within 12 months)", rule: "Year end within the last 12 months", value: "-", outcome: "Unclear", why: "No accounts year end found." });
+  else { const months = (today - ye) / (30.44 * 864e5); const ok = months <= P.accountsMonths;
+    add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age (accounts within 12 months)", rule: "Year end within the last 12 months", value: ye.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }), outcome: ok ? "Pass" : "Fail", flag: ok ? null : "red", outOfDate: !ok, why: ok ? `${Math.floor(months)} months old.` : `${Math.floor(months)} months old, so out of date. Ask for newer accounts.` }); }
+
+  c.checks = checks;
+}
+
+/* ------------------------------------------------------------------ sensitivities and covenant headroom (calculated) */
+const COVENANTS = { ltv: 75, icr: 1.35 }; // illustrative proposed covenant levels, not from a lender
+function computeAnalysis(c) {
+  const out = []; const add = (label, value, note) => out.push({ label, value, note });
+  const L = num(c, "loan_amount"), V = num(c, "property_value"), R = num(c, "annual_rent"), rate = num(c, "interest_rate_pct"), T = num(c, "loan_term_years");
+  const area = num(c, "floor_area_sqft"), erv = num(c, "market_rent"), vy = num(c, "valuation_yield_pct"), debt = num(c, "existing_debt");
+  const rUsed = Math.max(rate || 0, POLICY.stressRate); const interest = L != null ? (L * rUsed) / 100 : null;
+  if (L != null && debt != null) add("Use of funds", `${money(debt)} to existing lender`, L >= debt ? `${money(L - debt)} left for fees and equity release.` : `Loan is ${money(debt - L)} short of the existing debt, so the borrower must fund the gap.`);
+  if (L != null && R != null) add("Debt yield", pct((R / L) * 100), "Passing rent as a share of the loan. A common benchmark for secondary commercial property is 8% to 10% or more.");
+  if (V != null && R != null) add("Implied yield on value", pct((R / V) * 100, 2), vy != null ? `Valuer's stated yield is ${vy}%.` : "Passing rent divided by market value (gross).");
+  if (area) { if (V != null) add("Capital value per sq ft", "£" + Math.round(V / area), `On ${Math.round(area).toLocaleString("en-GB")} sq ft.`); if (R != null) add("Passing rent per sq ft", "£" + (R / area).toFixed(2), erv != null ? `ERV £${(erv / area).toFixed(2)} per sq ft.` : ""); }
+  if (R != null && erv != null) { const rev = ((erv - R) / R) * 100; add("Reversion", pct(rev), rev >= 0 ? `ERV ${money(erv)} is above passing rent, so rents are not over-rented.` : `Passing rent is above ERV ${money(erv)}: over-rented, so income may fall at lease events.`); }
+  if (interest != null && R != null) {
+    add("ICR if rates rise 2%", times(R / ((L * (rUsed + 2)) / 100)), `At ${(rUsed + 2).toFixed(2)}% against the ${POLICY.minICR}x policy minimum.`);
+    const withRent = c.tenants.filter((t) => t.annual_rent > 0);
+    if (withRent.length > 1) { const top = withRent.slice().sort((a, b) => b.annual_rent - a.annual_rent)[0]; add("ICR if the largest tenant leaves", times((R - top.annual_rent) / interest), `Without ${top.name} (${money(top.annual_rent)}).`); }
+    add("Break-even occupancy", pct((interest / R) * 100, 0), "Share of the passing rent needed to pay interest.");
+    add("Rent fall before ICR covenant breach", pct(Math.max(0, (1 - (COVENANTS.icr * interest) / R) * 100), 0), `Against a proposed ICR covenant of ${COVENANTS.icr}x.`);
+  }
+  if (L != null && V != null) {
+    add("LTV if value falls 10%", pct((L / (V * 0.9)) * 100), "");
+    add("LTV if value falls 20%", pct((L / (V * 0.8)) * 100), "");
+    add("Value fall before LTV covenant breach", pct(Math.max(0, (1 - L / (COVENANTS.ltv / 100) / V) * 100), 0), `Against a proposed LTV covenant of ${COVENANTS.ltv}%.`);
+  }
+  if (T != null && c.tenants.length && R) {
+    const end = new Date(); end.setFullYear(end.getFullYear() + T);
+    const atRisk = c.tenants.filter((t) => { const d = [parseDate(t.break_date), parseDate(t.lease_end)].filter(Boolean).sort((a, b) => a - b)[0]; return d && d <= end; });
+    const rr = atRisk.reduce((s, t) => s + (t.annual_rent || 0), 0);
+    add("Rent with a lease end or break within the loan term", pct((rr / R) * 100, 0), atRisk.length ? `${atRisk.length} tenant${atRisk.length > 1 ? "s" : ""}: ${atRisk.map((t) => t.name).join(", ")}.` : "No lease events before maturity.");
+  }
+  c.analysis = out;
+}
+
+/* ------------------------------------------------------------------ recommendation (BR-06) and routing (BR-07) */
+function computeRecommendation(c) {
+  const allChecks = c.checks.concat(c.judgements);
+  const reasons = [];
+  const core = c.checks.filter((k) => k.core && k.outcome === "Fail");
+  const missing = FIELDS.filter((f) => {
+    const x = c.fields[f.key]; const need = f.mandatory || (f.mandatoryIf === "purchase" && x.state !== "Not applicable");
+    return need && !x.edited && x.state !== "Found" && x.state !== "Not applicable";
+  });
+  const outOfDate = c.checks.filter((k) => k.outOfDate);
+  const unclear = c.checks.filter((k) => k.outcome === "Unclear" && !["epc"].includes(k.id));
+  const exceptions = allChecks.filter((k) => k.outcome === "Fail" && !k.core && !k.outOfDate);
+  core.forEach((k) => reasons.push({ text: `${k.area}: ${k.why}`, ref: k.id }));
+  exceptions.forEach((k) => reasons.push({ text: `${k.area} outside policy: ${k.value && k.value !== "-" ? k.value + ". " : ""}${k.why || k.explanation || ""}`, ref: k.id }));
+  missing.forEach((f) => reasons.push({ text: `${FIELD[f.key].label} is ${c.fields[f.key].state.toLowerCase()}.${c.fields[f.key].note ? " " + c.fields[f.key].note : ""}`, ref: "field:" + f.key }));
+  outOfDate.forEach((k) => reasons.push({ text: `Out of date: ${k.area.toLowerCase()} (${k.why})`, ref: k.id }));
+  unclear.forEach((k) => { if (!missing.length) reasons.push({ text: `${k.area}: ${k.why}`, ref: k.id }); });
+  c.consistency.forEach((x) => reasons.push({ text: `Inconsistent: ${x.text}`, ref: "field:" + x.key }));
+  allChecks.filter((k) => k.flag === "amber" && k.outcome === "Pass").forEach((k) => reasons.push({ text: `Watch: ${k.area}, ${k.why}`, ref: k.id }));
+  c.judgements.filter((k) => k.outcome === "Unclear").forEach((k) => reasons.push({ text: `To review: ${k.area}, ${k.explanation}`, ref: k.id }));
+
+  let kind, label;
+  if (core.length) { kind = "decline"; label = "Decline (outside appetite)"; }
+  else if (missing.length || outOfDate.length || unclear.length) { kind = "more"; label = "Request more information"; }
+  else if (exceptions.length) { kind = "escalate"; label = "Escalate (policy exception)"; }
+  else { kind = "approve"; label = "Approve (within appetite)"; }
+  const L = num(c, "loan_amount");
+  let approver;
+  if (L != null && L > POLICY.maxLoan) approver = "Outside appetite: decline";
+  else if (exceptions.length) approver = "Credit Committee (policy exception)";
+  else if (L != null && L > POLICY.uwLimit) approver = "Credit Committee (over £1m)";
+  else approver = "Underwriter (up to £1m)";
+  const complete = !missing.length; const consistent = !c.consistency.length;
+  c.rec = { kind, label, reasons, approver, complete, consistent, exceptions: exceptions.map((k) => k.area), at: nowISO() };
+}
+
+/* ------------------------------------------------------------------ memo assembly (BR-09) */
+const MEMO_SECTIONS = [
+  ["summary", "Executive summary"], ["proposal", "Proposal and structure"], ["borrower", "Borrower and sponsor"], ["property", "Property and location"],
+  ["valuation", "Valuation"], ["income", "Income and lease profile"], ["financial_analysis", "Financial analysis"], ["sensitivity", "Sensitivity analysis"],
+  ["external", "External checks"], ["policy", "Policy assessment"], ["exit", "Exit strategy"], ["risks", "Risks and mitigants"],
+  ["covenants", "Covenants"], ["conditions", "Conditions"], ["recommendation", "Recommendation"],
+];
+function systemSections(c) {
+  const pol = c.checks.concat(c.judgements).map((k) => `- ${k.area} (${k.clause}): ${k.outcome}. ${k.type === "Calculated" ? k.why : k.explanation}${k.source && k.source.doc ? ` [${k.source.doc} p${k.source.page || 1}]` : ""}`).join("\n");
+  const rec = `Suggested: ${c.rec.label}. Required approver: ${c.rec.approver}.\n\nReasons, most important first:\n\n` + (c.rec.reasons.length ? c.rec.reasons.map((r) => "- " + r.text).join("\n") : "- All provisions pass and no material issues were found.") + `\n\nThis is the system's suggestion. The approver makes the decision and records the rationale.`;
+  return {
+    external: "Companies House, Land Registry and credit bureau checks are not connected in this prototype. In the product, Companies House is checked live and Land Registry and bureau results are mocked for the MVP.",
+    policy: `Assessed against the ${POLICY.name} (${POLICY.version}). Numeric limits are calculated, not judged by the AI.\n\n${pol}`,
+    recommendation: rec,
+    sensitivity: "Calculated in code from the extracted figures. Proposed covenant levels (LTV " + COVENANTS.ltv + "%, ICR " + COVENANTS.icr + "x) are illustrative, not from a lender.\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate."),
+  };
+}
+function refreshSystemSections(c) {
+  if (!c.memo) return;
+  const s = systemSections(c);
+  Object.keys(s).forEach((k) => { const sec = c.memo[k]; if (!sec || sec.by === "System") c.memo[k] = { text: s[k], by: "System", at: nowISO() }; });
+}
+
+/* ------------------------------------------------------------------ the agent run */
+async function runAgents(c, onlyMemo = false) {
+  const imgs = memImages[c.id] || [];
+  const steps = [
+    { id: "intake", agent: "Intake agent", text: `Read ${c.docs.length} document${c.docs.length === 1 ? "" : "s"}`, state: "done" },
+    { id: "extract", agent: "Extraction agent", text: "Classify documents and extract fields with sources", state: onlyMemo ? "done" : "todo" },
+    { id: "policy", agent: "Policy agent", text: "Run calculated checks against the credit policy", state: onlyMemo ? "done" : "todo" },
+    { id: "memo", agent: "Memo agent", text: "Assess judgement areas and draft the credit memo", state: "todo" },
+  ];
+  c.run = { steps, error: null, running: true };
+  c.status = "New (being read by agents)";
+  render();
+  const set = (id, state, extra) => { const s = steps.find((x) => x.id === id); s.state = state; if (extra) s.detail = extra; render(); };
+  try {
+    if (!c.docs.length) throw new Error("No documents could be read. Add a PDF, Word, Excel, text or image file.");
+    if (!onlyMemo) {
+      set("extract", "active");
+      const r = await askAI(extractPrompt(c, imgs), imgs, "extract");
+      normaliseExtraction(c, r);
+      const found = FIELDS.filter((f) => c.fields[f.key].state === "Found").length;
+      set("extract", "done", `${found} of ${FIELDS.length} fields found, ${c.tenants.length} tenant${c.tenants.length === 1 ? "" : "s"}, ${c.consistency.length} consistency flag${c.consistency.length === 1 ? "" : "s"}`);
+      audit(c, "Extraction agent", `Extracted ${found} of ${FIELDS.length} fields with sources; classified ${c.docs.length} documents`, "agent");
+      const b = usable(c, "borrower_name"); const pa = usable(c, "property_address");
+      c.title = b || pa || c.title;
+      set("policy", "active");
+      computeChecks(c); computeAnalysis(c);
+      c.judgements = [];
+      computeRecommendation(c);
+      set("policy", "done", `${c.checks.filter((k) => k.outcome === "Pass").length} pass, ${c.checks.filter((k) => k.outcome === "Fail").length} fail, ${c.checks.filter((k) => k.outcome === "Unclear").length} unclear`);
+      audit(c, "Policy agent", `Ran ${c.checks.length} calculated checks against ${POLICY.name}`, "agent");
+    }
+    set("memo", "active");
+    const m = await askAI(memoPrompt(c), [], "memo");
+    c.judgements = JUDGEMENT_AREAS.map((j) => {
+      const got = (m.judgements || []).find((x) => String(x.area || "").toLowerCase() === j.area.toLowerCase()) || {};
+      const outcome = ["Pass", "Fail", "Unclear"].includes(got.outcome) ? got.outcome : "Unclear";
+      return { id: "j-" + j.area.toLowerCase().replace(/\s+/g, "-"), type: "Reasoned", area: j.area, clause: j.clause, rule: j.rule, value: got.evidence || "", outcome, explanation: got.explanation || "Not assessed.", source: got.source || null, flag: outcome === "Fail" ? "red" : null };
+    });
+    computeRecommendation(c);
+    const prevMemo = c.memo || {};
+    const memo = {};
+    MEMO_SECTIONS.forEach(([k]) => {
+      if (prevMemo[k] && prevMemo[k].by !== "Memo agent" && prevMemo[k].by !== "System") memo[k] = prevMemo[k];
+      else if ((m.memo || {})[k] != null) memo[k] = { text: String(m.memo[k]), by: "Memo agent", at: nowISO() };
+    });
+    c.memo = memo; refreshSystemSections(c);
+    c.brokerRequest = m.broker_request || "";
+    c.memoStale = false;
+    set("memo", "done", `Memo drafted; ${c.judgements.filter((j) => j.outcome !== "Pass").length} judgement area${c.judgements.filter((j) => j.outcome !== "Pass").length === 1 ? "" : "s"} to review`);
+    audit(c, "Memo agent", "Assessed 5 judgement areas and drafted the credit memo", "agent");
+    audit(c, "Policy agent", `Suggested ${c.rec.label}; required approver ${c.rec.approver}`, "agent");
+    c.status = c.decision ? c.status : "With RM";
+  } catch (e) {
+    const s = steps.find((x) => x.state === "active"); if (s) s.state = "error";
+    c.run.error = e.message || String(e);
+    audit(c, "System", "Agent run stopped: " + c.run.error, "agent");
+  }
+  c.run.running = false;
+  save(); render();
+}
+
+/* ------------------------------------------------------------------ human actions */
+function editField(c, key, newVal) {
+  const f = c.fields[key]; const old = f.value;
+  const v = NUMERIC.has(key) ? parseNum(newVal) : newVal.trim();
+  if (NUMERIC.has(key) && v == null) { toast("Enter a number"); return; }
+  f.value = v; f.state = "Found"; f.edited = { by: "You", at: nowISO(), old };
+  c.consistency = c.consistency.filter((x) => x.key !== key && x.key !== "tenants_sum");
+  applyNA(c);
+  audit(c, "You", `Corrected ${FIELD[key].label}: "${old ?? "blank"}" to "${v}"`);
+  computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c);
+  if (c.memo) c.memoStale = true;
+  save(); render();
+}
+function confirmField(c, key) {
+  const f = c.fields[key]; f.edited = { by: "You", at: nowISO(), old: f.value, confirmed: true }; f.state = "Found";
+  audit(c, "You", `Confirmed ${FIELD[key].label} as "${f.value}"`);
+  computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c); save(); render();
+}
+
+/* ------------------------------------------------------------------ rendering */
+function refChip(doc, page, quote) {
+  return `<button class="ref" type="button" data-src="${esc(doc)}" data-page="${esc(page || 1)}" data-quote="${esc(quote || "")}" title="Open source">${esc(doc)} p${esc(page || 1)}</button>`;
+}
+function renderRich(text) {
+  const blocks = String(text || "").replace(/\r/g, "").split(/\n\s*\n/);
+  const inline = (s) => esc(s).replace(/\[(D\d+)\s*,?\s*p(?:age)?\.?\s*(\d+)\]/gi, (_, d, p) => refChip(d, p, "")).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  return blocks.map((b) => {
+    const lines = b.split("\n").filter((l) => l.trim());
+    if (lines.length && lines.every((l) => /^\s*[-•*]\s+/.test(l))) return "<ul>" + lines.map((l) => "<li>" + inline(l.replace(/^\s*[-•*]\s+/, "")) + "</li>").join("") + "</ul>";
+    return "<p>" + lines.map(inline).join("<br>") + "</p>";
+  }).join("");
+}
+function outcomeChip(k) {
+  if (k.outcome === "Pass" && k.flag === "amber") return `<span class="chip o-amber">Pass, watch</span>`;
+  const cls = { Pass: "o-pass", Fail: "o-fail", Unclear: "o-unclear", "N/A": "o-na" }[k.outcome] || "o-na";
+  return `<span class="chip ${cls}">${esc(k.outcome === "N/A" ? "Not applicable" : k.outcome)}</span>`;
+}
+
+function renderSamples() {
+  const el = $("#samples");
+  if (!SAMPLES) { el.innerHTML = `<p class="empty-note">Sample packs are not included in this copy.</p>`; return; }
+  el.innerHTML = Object.entries(SAMPLES).map(([k, s]) => `<button class="sample" type="button" data-sample="${k}"><b>${esc(s.label)}</b><span>${esc(s.blurb)}</span></button>`).join("");
+}
+function renderCaseList() {
+  const el = $("#caselist");
+  if (!cases.length) { el.innerHTML = `<p class="empty-note">No cases yet. Upload a pack or try a sample.</p>`; return; }
+  el.innerHTML = cases.map((c) => {
+    const L = c.fields ? num(c, "loan_amount") : null;
+    const dot = !c.rec ? "" : `<span class="dot ${c.rec.complete && c.rec.consistent ? "ok" : c.rec.complete || c.rec.consistent ? "warn" : "bad"}" title="${c.rec.complete ? "Complete" : "Incomplete"}, ${c.rec.consistent ? "consistent" : "inconsistent"}"></span>`;
+    return `<button class="caseitem ${c.id === currentId ? "active" : ""}" type="button" data-case="${c.id}"><span class="t">${esc(c.title)}</span><span class="m">${dot}<span class="num">${L != null ? money(L) : ""}</span><span>${esc(c.status)}</span></span></button>`;
+  }).join("");
+}
+function renderWelcome() {
+  return `<div class="welcome">
+    <h1>From broker pack to draft credit memo</h1>
+    <p>Upload a deal pack, or try one of the fictional sample packs on the left. The agents read every document, extract the application fields with links to their source, run the credit policy checks and draft the memo. You check the work, correct anything that is wrong, and make the decision.</p>
+    <div class="steps">
+      <div class="step"><b>1. Read</b><span>Each document is classified and every field gets a source and a state: Found, Not present, Not confident or Not applicable.</span></div>
+      <div class="step"><b>2. Check</b><span>LTV, ICR, DSCR, loan size, term, EPC, WAULT and document age are calculated against the policy, with the working shown.</span></div>
+      <div class="step"><b>3. Draft</b><span>The memo agent drafts the credit memo with every figure linked to its source, and a request to the broker if anything is missing.</span></div>
+      <div class="step"><b>4. Decide</b><span>A person reviews, edits and records the decision with a rationale, within their approval authority.</span></div>
+    </div>
+    <p style="font-size:13px">Use made-up or anonymised packs only. The AI provider in use is shown in the red bar; change it in Settings.</p>
+  </div>`;
+}
+function figure(k, v, sub) { return `<div><div class="k">${k}</div><div class="v">${v}${sub ? ` <small>${sub}</small>` : ""}</div></div>`; }
+function renderCase(c) {
+  const ready = !!c.fields;
+  const L = ready ? num(c, "loan_amount") : null, T = ready ? num(c, "loan_term_years") : null;
+  const ltv = c.checks.find((k) => k.id === "ltv"), icr = c.checks.find((k) => k.id === "icr");
+  const tabs = [["summary", "Summary"], ["fields", "Fields", ready ? FIELDS.filter((f) => !["Found", "Not applicable"].includes(c.fields[f.key].state)).length || "" : ""], ["checks", "Policy checks"], ["memo", "Credit memo"], ["decision", "Decision"], ["audit", "Audit trail", c.audit.length]];
+  let body = "";
+  if (currentTab === "summary") body = renderSummary(c);
+  else if (!ready) body = `<div class="card"><p class="hint">This appears once the agents have read the pack.</p></div>`;
+  else if (currentTab === "fields") body = renderFields(c);
+  else if (currentTab === "checks") body = renderChecks(c);
+  else if (currentTab === "memo") body = renderMemo(c);
+  else if (currentTab === "decision") body = renderDecision(c);
+  if (currentTab === "audit") body = renderAudit(c);
+  return `<div class="casehead">
+      <div class="row" style="justify-content:space-between;align-items:flex-start">
+        <div><h1>${esc(c.title)}</h1><div class="sub">${esc(ready ? usable(c, "property_address") || "" : "")}${ready && usable(c, "broker") ? " · via " + esc(usable(c, "broker")) : ""} · created ${dateOf(c.createdAt)} ${timeOf(c.createdAt)}</div></div>
+        <div class="row"><span class="chip status">${esc(c.status)}</span><button class="btn small" type="button" data-act="delete-case">Delete case</button></div>
+      </div>
+      <div class="figures">
+        ${figure("Facility", L != null ? money(L) : "-")}
+        ${figure("Term", T != null ? T + " yrs" : "-", ready && usable(c, "repayment_basis") ? esc(usable(c, "repayment_basis")) : "")}
+        ${figure("LTV", ltv ? ltv.value : "-")}
+        ${figure("Interest cover", icr ? icr.value : "-")}
+        ${figure("Risk grade", c.decision && c.decision.grade ? c.decision.grade + " / 10" : "-")}
+        ${figure("Suggested", c.rec ? esc(c.rec.label.split(" (")[0]) : "-")}
+      </div>
+    </div>
+    <div class="tabs" role="tablist">${tabs.map(([id, name, n]) => `<button class="tab" role="tab" type="button" aria-selected="${currentTab === id}" data-tab="${id}">${name}${n ? `<span class="count">${n}</span>` : ""}</button>`).join("")}</div>
+    <div class="panel">${body}</div>`;
+}
+function renderRun(c) {
+  if (!c.run) return "";
+  return `<div class="card"><h2>Agent run</h2><div class="run">${c.run.steps.map((s) => `<div class="runstep ${s.state}"><span class="ic">${s.state === "done" ? "✓" : s.state === "error" ? "!" : ""}</span><div><b>${esc(s.agent)}</b><span>${esc(s.detail || s.text)}</span></div></div>`).join("")}</div>
+    ${c.run.error ? `<div class="errbox"><b>The run stopped.</b> ${esc(c.run.error)}</div><div class="row"><button class="btn primary" type="button" data-act="rerun">Run the agents again</button><button class="btn" type="button" data-act="settings">Settings</button></div>` : ""}
+    ${!c.run.running && !c.run.error ? `<div class="row"><button class="btn small" type="button" data-act="rerun">Run all agents again</button></div>` : ""}</div>`;
+}
+function renderSummary(c) {
+  const docs = `<div class="card"><h2>Documents</h2><div class="tablewrap"><table class="t"><thead><tr><th>Ref</th><th>Document</th><th>Type</th><th>Summary</th></tr></thead><tbody>${c.docs.map((d) => `<tr><td>${refChip(d.id, 1, "")}</td><td>${esc(d.name)}<div class="note">${d.pages.length} page${d.pages.length > 1 ? "s" : ""}</div></td><td>${esc(d.type || "-")}${d.date ? `<div class="note">${esc(d.date)}</div>` : ""}</td><td class="note">${esc(d.summary || "")}</td></tr>`).join("")}</tbody></table></div></div>`;
+  if (!c.rec) return `<div class="grid2"><div class="panel">${renderRun(c)}</div><div class="panel">${docs}</div></div>`;
+  const r = c.rec;
+  const rec = `<div class="rec ${r.kind}"><div class="title"><span class="label">Suggested by the agents</span></div><div class="title"><b>${esc(r.label)}</b><span class="chip status">Approver: ${esc(r.approver)}</span></div>
+    <ol>${r.reasons.slice(0, 8).map((x) => `<li>${esc(x.text)}</li>`).join("") || "<li>All provisions pass and no material issues were found.</li>"}</ol>
+    <p class="small">${r.complete ? "Complete" : "Incomplete"} and ${r.consistent ? "consistent" : "inconsistent"}. This is a suggestion; the approver decides. <button class="btn link" type="button" data-tab="decision">Go to decision</button></p></div>`;
+  const flags = c.consistency.length ? `<div class="card"><h2>Consistency flags</h2>${c.consistency.map((x) => `<div class="flagrow"><b>${esc(FIELD[x.key] ? FIELD[x.key].label : "Rent")}</b><span>${esc(x.text)}</span>${x.cands ? `<span>${x.cands.map((k) => k.doc ? refChip(k.doc, k.page, k.quote) : "").join(" ")}</span>` : ""}</div>`).join("")}</div>` : "";
+  const req = c.brokerRequest ? `<div class="card"><h2>Draft request to the broker</h2><p class="hint">Drafted by the memo agent. Edit, then copy it into your email. Nothing is sent from here.</p><div class="field"><textarea id="brokerReq" aria-label="Draft request to the broker">${esc(c.brokerRequest)}</textarea></div><div class="row"><button class="btn" type="button" data-act="copy-req">Copy email</button><button class="btn" type="button" data-act="log-req">Mark as sent to broker</button></div></div>` : "";
+  return `<div class="grid2"><div class="panel">${rec}${flags}${req}</div><div class="panel">${renderRun(c)}${docs}</div></div>`;
+}
+function renderFields(c) {
+  let html = `<div class="card"><h2>Extracted fields</h2><p class="hint">Click a source to see the page it came from. Correct a value with Edit; every change is audited and the checks are recalculated.</p><div class="tablewrap"><table class="t"><thead><tr><th>Field</th><th>Value</th><th>State</th><th>Source</th><th></th></tr></thead><tbody>`;
+  let g = "";
+  FIELDS.forEach((f) => {
+    const x = c.fields[f.key];
+    if (f.group !== g) { g = f.group; html += `<tr class="group"><td colspan="5">${g}</td></tr>`; }
+    const val = x.value == null || x.value === "" ? "" : f.type === "money" ? money(x.value) : String(x.value);
+    const others = (x.candidates || []).filter((k) => k.doc && !(x.source && k.doc === x.source.doc && k.page == x.source.page));
+    html += `<tr data-field="${f.key}"><td>${esc(f.label)}${f.mandatory ? ' <span class="note">required</span>' : ""}</td>
+      <td><span class="fv">${esc(val) || '<span class="note">blank</span>'}</span>${x.note && x.state !== "Found" ? `<div class="note">${esc(x.note)}</div>` : ""}${x.edited ? `<div class="note">${x.edited.confirmed ? "Confirmed" : "Corrected"} by you at ${timeOf(x.edited.at)}${!x.edited.confirmed ? `, was "${esc(x.edited.old ?? "blank")}"` : ""}</div>` : ""}</td>
+      <td><span class="chip ${stateClass(x.state)}">${esc(x.state)}</span></td>
+      <td>${x.source ? refChip(x.source.doc, x.source.page, x.source.quote) : ""}${others.length ? `<div class="note">Also in ${others.map((k) => refChip(k.doc, k.page, k.quote)).join(" ")}</div>` : ""}</td>
+      <td><div class="row"><button class="btn small" type="button" data-act="edit-field" data-key="${f.key}">Edit</button>${x.state === "Not confident" && !x.edited ? `<button class="btn small" type="button" data-act="confirm-field" data-key="${f.key}">Confirm</button>` : ""}</div></td></tr>`;
+  });
+  html += `</tbody></table></div></div>`;
+  html += `<div class="card"><h2>Tenants</h2>${c.tenants.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Tenant</th><th>Rent pa</th><th>Lease end</th><th>Break</th><th>Source</th></tr></thead><tbody>${c.tenants.map((t) => `<tr><td>${esc(t.name)}${t.note ? `<div class="note">${esc(t.note)}</div>` : ""}</td><td class="num">${money(t.annual_rent)}</td><td class="num">${t.lease_end ? esc(t.lease_end) : '<span class="chip s-notconfident">Not confident</span>'}</td><td class="num">${esc(t.break_date || "-")}</td><td>${t.source && t.source.doc ? refChip(t.source.doc, t.source.page, t.source.quote) : ""}</td></tr>`).join("")}</tbody></table></div>` : `<p class="hint">No tenancy schedule or leases in the pack.</p>`}</div>`;
+  return html;
+}
+function renderChecks(c) {
+  const row = (k) => `<tr><td><b>${esc(k.area)}</b><div class="note">${esc(k.clause)}</div></td><td>${esc(k.rule)}</td><td class="fv">${esc(k.type === "Reasoned" ? "" : k.value)}</td><td>${outcomeChip(k)}</td><td>${esc(k.type === "Reasoned" ? k.explanation : k.why)}${k.type === "Reasoned" && k.value ? `<div class="note">Evidence: ${esc(k.value)}</div>` : ""}${k.source && k.source.doc ? " " + refChip(k.source.doc, k.source.page, "") : ""}</td></tr>`;
+  return `<div class="card"><h2>Calculated checks</h2><p class="hint">Worked out in code from the extracted figures, so the answer is exact and repeatable. ${esc(POLICY.name)}, ${esc(POLICY.version)}.</p><div class="tablewrap"><table class="t"><thead><tr><th>Provision</th><th>Policy</th><th>Case</th><th>Outcome</th><th>Explanation</th></tr></thead><tbody>${c.checks.map(row).join("")}</tbody></table></div></div>
+  <div class="card"><h2>Judgement areas</h2><p class="hint">Assessed by the memo agent and explained. A person should read these.</p>${c.judgements.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Provision</th><th>Policy</th><th></th><th>Outcome</th><th>Explanation</th></tr></thead><tbody>${c.judgements.map(row).join("")}</tbody></table></div>` : `<p class="hint">Not assessed yet.</p>`}</div>`;
+}
+let editingSection = null;
+function renderMemo(c) {
+  if (!c.memo) return `<div class="card"><p class="hint">The memo appears once the memo agent has run.</p></div>`;
+  const stale = c.memoStale ? `<div class="stale"><span>Figures have changed since the memo was drafted. The policy assessment and recommendation are updated; the written sections are not.</span><button class="btn small" type="button" data-act="redraft">Redraft agent sections</button></div>` : "";
+  return `${stale}<div class="row" style="justify-content:space-between"><p class="hint" style="margin:0;color:var(--muted)">Drafted by the memo agent until a person edits it. Click a source to check a figure.</p><button class="btn" type="button" data-act="copy-memo">Copy memo</button></div>` +
+    MEMO_SECTIONS.map(([k, name]) => {
+      const s = c.memo[k] || { text: "", by: "Memo agent" };
+      const by = s.by === "You" ? `Edited by you at ${timeOf(s.at)}` : s.by === "System" ? "Generated from the checks" : "Drafted by the memo agent";
+      const body = editingSection === k ? `<div class="field"><textarea id="memoEdit" aria-label="${esc(name)}">${esc(s.text)}</textarea></div><div class="row"><button class="btn primary small" type="button" data-act="save-sec" data-key="${k}">Save</button><button class="btn small" type="button" data-act="cancel-sec">Cancel</button></div>` : `<div class="memo-body">${renderRich(s.text) || '<p class="note">Empty</p>'}</div>`;
+      return `<section class="memo-sec"><header><h3>${esc(name)}</h3><span class="by">${by}</span><span class="grow"></span>${editingSection === k ? "" : `<button class="btn small" type="button" data-act="edit-sec" data-key="${k}">Edit</button>`}</header>${body}</section>`;
+    }).join("");
+}
+let draftDecision = { role: "Underwriter", choice: "", grade: "", rationale: "", conditions: "" };
+function authority(c, role) {
+  const L = num(c, "loan_amount") || 0; const exc = c.rec && c.rec.exceptions.length;
+  if (L > POLICY.maxLoan) return { canApprove: false, why: "Over £10m is outside appetite. No one can approve it." };
+  if (role === "Underwriter") {
+    if (L > POLICY.uwLimit) return { canApprove: false, why: "Over £1m, so only Credit Committee can approve. You can escalate." };
+    if (exc) return { canApprove: false, why: "Policy exception, so only Credit Committee can approve. You can escalate." };
+  }
+  return { canApprove: true, why: "" };
+}
+function renderDecision(c) {
+  if (c.decision) {
+    const d = c.decision;
+    return `<div class="decided"><span class="label">Decision recorded</span><b style="font-size:18px">${esc(d.choice)}</b><span>By you as ${esc(d.role)}, ${dateOf(d.at)} ${timeOf(d.at)}. Risk grade ${esc(d.grade || "-")}.</span>${d.override ? `<span class="note">Differs from the suggestion (${esc(c.rec.label)}). Overrides are recorded and are a normal part of the process.</span>` : ""}<div><b>Rationale</b><div class="memo-body">${renderRich(d.rationale)}</div></div>${d.conditions ? `<div><b>Conditions</b><div class="memo-body">${renderRich(d.conditions)}</div></div>` : ""}<div class="row"><button class="btn small" type="button" data-act="reopen">Reopen the decision</button></div></div>`;
+  }
+  const dd = draftDecision; const au = authority(c, dd.role);
+  const opts = [
+    ["Approve", "Indicative terms can be prepared.", !au.canApprove, au.why],
+    ["Decline", "The broker gets a polite decline.", false, ""],
+    ["Request more information", "The case goes back to the RM to ask the broker.", false, ""],
+    ["Escalate to Credit Committee", "For cases above your limit or with a policy exception.", dd.role !== "Underwriter", dd.role !== "Underwriter" ? "Already with Credit Committee." : ""],
+  ];
+  if (dd.choice && opts.find((o) => o[0] === dd.choice && o[2])) dd.choice = "";
+  const condSuggest = c.memo && c.memo.conditions ? c.memo.conditions.text : "";
+  return `<div class="rec ${c.rec.kind}"><div class="title"><span class="label">Suggested by the agents</span></div><div class="title"><b>${esc(c.rec.label)}</b><span class="chip status">Approver: ${esc(c.rec.approver)}</span></div><p class="small">You can agree with it or override it. Either way, record your reasons.</p></div>
+  <div class="card"><h2>Record the decision</h2>
+    <div class="field"><label for="decRole">Acting as</label><select id="decRole"><option ${dd.role === "Underwriter" ? "selected" : ""}>Underwriter</option><option ${dd.role === "Credit Committee" ? "selected" : ""}>Credit Committee</option></select><span class="note">Underwriter decides up to £1m within policy. Credit Committee decides up to £10m and all policy exceptions.</span></div>
+    <div class="choices">${opts.map(([name, desc, dis, why]) => `<label class="choice ${dis ? "disabled" : ""}"><input type="radio" name="decChoice" value="${esc(name)}" ${dis ? "disabled" : ""} ${dd.choice === name ? "checked" : ""}><span><b>${esc(name)}</b><small>${esc(dis && why ? why : desc)}</small></span></label>`).join("")}</div>
+    <div class="field"><label for="decGrade">Risk grade</label><select id="decGrade"><option value="">Choose a grade</option>${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<option ${String(dd.grade) === String(n) ? "selected" : ""}>${n}</option>`).join("")}</select><span class="note">1 is lowest risk. Recorded by the Underwriter in the MVP.</span></div>
+    <div class="field"><label for="decConditions">Conditions</label><textarea id="decConditions" placeholder="One condition per line, starting with -">${esc(dd.conditions)}</textarea>${condSuggest ? `<div><button class="btn small" type="button" data-act="use-conds">Use the memo's suggested conditions</button></div>` : ""}</div>
+    <div class="field"><label for="decRationale">Rationale (required)</label><textarea id="decRationale" placeholder="Why you made this decision">${esc(dd.rationale)}</textarea></div>
+    <div class="row"><button class="btn primary" type="button" data-act="record">Record decision</button><span class="note" id="decMsg"></span></div>
+  </div>`;
+}
+function renderAudit(c) {
+  return `<div class="card"><h2>Audit trail</h2><p class="hint">Every agent and human action on this case, oldest first. Policy version: ${esc(POLICY.version)}.</p><ul class="audit">${c.audit.map((a) => `<li><span class="num note">${timeOf(a.at)}</span><span class="who ${a.kind === "agent" ? "agent" : ""}">${esc(a.who)}</span><span class="what">${esc(a.what)}</span></li>`).join("")}</ul></div>`;
+}
+function render() {
+  renderCaseList();
+  const c = cur();
+  $("#main").innerHTML = c ? renderCase(c) : renderWelcome();
+}
+
+/* ------------------------------------------------------------------ source viewer */
+function openSource(docId, page, quote) {
+  const c = cur(); if (!c) return;
+  const d = c.docs.find((x) => x.id === docId);
+  if (!d) { toast("That document is not in this case"); return; }
+  page = Math.min(Math.max(1, +page || 1), d.pages.length);
+  $("#srcTitle").textContent = `${d.id}: ${d.name}`;
+  $("#srcNav").innerHTML = d.pages.length > 1 ? d.pages.map((_, i) => `<button class="btn small ${i + 1 === page ? "primary" : ""}" type="button" data-srcpage="${i + 1}">Page ${i + 1}</button>`).join("") : `<span class="note">Page 1 of 1</span>`;
+  $("#srcNav").dataset.doc = docId; $("#srcNav").dataset.quote = quote || "";
+  let text = esc(d.pages[page - 1] || "");
+  let found = false;
+  if (quote) {
+    const words = quote.trim().split(/\s+/).map((w) => esc(w).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    for (const n of [words.length, Math.min(5, words.length), Math.min(3, words.length)]) {
+      if (!n) break;
+      const re = new RegExp(words.slice(0, n).join("\\s+"), "i");
+      if (re.test(text)) { text = text.replace(re, (m) => `<mark>${m}</mark>`); found = true; break; }
+    }
+  }
+  const img = (memImages[c.id] || []).find((im) => im.doc === docId && im.page === page);
+  $("#srcBody").innerHTML = (quote ? `<p class="note" style="margin:0 0 8px">${found ? "Highlighted" : "Quoted by the agent (not found word for word on this page)"}: "${esc(quote)}"</p>` : "") +
+    (img ? `<img class="pageimg" alt="Page ${page}" src="data:${img.mime};base64,${img.b64}">` : `<div class="pagetext">${text}</div>`);
+  $("#sourceModal").hidden = false;
+  const m = $("#srcBody mark"); if (m) m.scrollIntoView({ block: "center" });
+}
+
+/* ------------------------------------------------------------------ settings */
+function renderSettings() {
+  const p = settings.provider;
+  const opt = (id, name, desc, extra = "") => `<label class="choice"><input type="radio" name="prov" value="${id}" ${p === id ? "checked" : ""}><span><b>${esc(name)}</b><small>${esc(desc)}</small></span></label>${extra}`;
+  $("#providerOpts").innerHTML =
+    opt("auto", "Automatic", "Claude (built in) inside the NashFlow link; Gemini when you open the downloaded copy.") +
+    opt("claude-builtin", PROVIDERS["claude-builtin"].name, PROVIDERS["claude-builtin"].desc) +
+    opt("gemini", PROVIDERS.gemini.name, PROVIDERS.gemini.desc) +
+    `<div class="cfg"><label for="gKey">Gemini API key</label><input id="gKey" type="password" autocomplete="off" value="${esc(settings.geminiKey)}" placeholder="Paste the key from aistudio.google.com"><label for="gModel">Gemini model</label><input id="gModel" type="text" value="${esc(settings.geminiModel)}"></div>` +
+    opt("claude-api", PROVIDERS["claude-api"].name, PROVIDERS["claude-api"].desc) +
+    `<div class="cfg"><label for="cKey">Claude API key</label><input id="cKey" type="password" autocomplete="off" value="${esc(settings.claudeKey)}"><label for="cModel">Claude model</label><input id="cModel" type="text" value="${esc(settings.claudeModel)}"></div>` +
+    opt("azure", PROVIDERS.azure.name, PROVIDERS.azure.desc) +
+    `<div class="cfg"><label for="aEnd">Endpoint</label><input id="aEnd" type="text" value="${esc(settings.azureEndpoint)}" placeholder="https://your-resource.openai.azure.com"><label for="aDep">Deployment name</label><input id="aDep" type="text" value="${esc(settings.azureDeployment)}"><label for="aKey">Key</label><input id="aKey" type="password" autocomplete="off" value="${esc(settings.azureKey)}"></div>`;
+}
+
+/* ------------------------------------------------------------------ events */
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("button, [data-close]");
+  if (!t) return;
+  if (t.hasAttribute("data-close")) { t.closest(".modal").hidden = true; return; }
+  if (t.dataset.src) { openSource(t.dataset.src, t.dataset.page, t.dataset.quote); return; }
+  if (t.dataset.srcpage) { openSource($("#srcNav").dataset.doc, t.dataset.srcpage, ""); return; }
+  if (t.dataset.case) { currentId = t.dataset.case; currentTab = "summary"; editingSection = null; save(); render(); window.scrollTo(0, 0); return; }
+  if (t.dataset.tab) { currentTab = t.dataset.tab; editingSection = null; render(); return; }
+  if (t.dataset.sample) {
+    const s = SAMPLES[t.dataset.sample];
+    const files = s.files.map((f) => new File([f.text != null ? f.text : b64ToBytes(f.b64)], f.name, { type: f.type }));
+    newCaseFromFiles(files, s.label); return;
+  }
+  if (t.id === "pickBtn") { $("#fileInput").click(); return; }
+  if (t.id === "openSettings" || t.dataset.act === "settings") { renderSettings(); $("#settingsModal").hidden = false; return; }
+  if (t.id === "saveSettings") {
+    settings.provider = (document.querySelector('input[name="prov"]:checked') || {}).value || "auto";
+    settings.geminiKey = $("#gKey").value.trim(); settings.geminiModel = $("#gModel").value.trim() || "gemini-2.5-flash";
+    settings.claudeKey = $("#cKey").value.trim(); settings.claudeModel = $("#cModel").value.trim() || "claude-sonnet-5-5";
+    settings.azureEndpoint = $("#aEnd").value.trim(); settings.azureDeployment = $("#aDep").value.trim(); settings.azureKey = $("#aKey").value.trim();
+    store("nashflow.settings", settings); renderProviderPill(); $("#settingsModal").hidden = true; toast("Settings saved"); return;
+  }
+  const c = cur(); if (!c) return;
+  const act = t.dataset.act;
+  if (act === "rerun") { runAgents(c); }
+  else if (act === "redraft") { runAgents(c, true); }
+  else if (act === "delete-case") {
+    if (t.dataset.confirm !== "1") { t.dataset.confirm = "1"; t.textContent = "Click again to delete"; return; }
+    cases = cases.filter((x) => x.id !== c.id); currentId = cases[0] ? cases[0].id : null; save(); render();
+  }
+  else if (act === "edit-field") {
+    const k = t.dataset.key; const f = c.fields[k]; const cell = t.closest("tr").children[1];
+    cell.innerHTML = `<div class="edit-inline"><input id="fieldEdit" type="text" value="${esc(f.value ?? "")}" aria-label="${esc(FIELD[k].label)}"><button class="btn primary small" type="button" data-act="save-field" data-key="${k}">Save</button></div>`;
+    $("#fieldEdit").focus();
+  }
+  else if (act === "save-field") { editField(c, t.dataset.key, $("#fieldEdit").value); }
+  else if (act === "confirm-field") { confirmField(c, t.dataset.key); }
+  else if (act === "edit-sec") { editingSection = t.dataset.key; render(); const ta = $("#memoEdit"); if (ta) ta.focus(); }
+  else if (act === "cancel-sec") { editingSection = null; render(); }
+  else if (act === "save-sec") {
+    const k = t.dataset.key; const before = (c.memo[k] || {}).text || ""; const after = $("#memoEdit").value;
+    if (after !== before) { c.memo[k] = { text: after, by: "You", at: nowISO() }; audit(c, "You", `Edited memo section "${MEMO_SECTIONS.find((x) => x[0] === k)[1]}" (before: ${before.length} characters, after: ${after.length})`); }
+    editingSection = null; save(); render();
+  }
+  else if (act === "copy-memo") {
+    const txt = `CREDIT MEMO: ${c.title}\n\n` + MEMO_SECTIONS.map(([k, n]) => `${n.toUpperCase()}\n${(c.memo[k] || {}).text || ""}`).join("\n\n");
+    copyText(txt, "Memo copied");
+  }
+  else if (act === "copy-req") { c.brokerRequest = $("#brokerReq").value; save(); copyText(c.brokerRequest, "Email copied"); }
+  else if (act === "log-req") { c.brokerRequest = $("#brokerReq").value; c.status = "More information requested"; audit(c, "You", "Marked the request to the broker as sent"); save(); render(); toast("Status: More information requested"); }
+  else if (act === "use-conds") { $("#decConditions").value = c.memo.conditions.text; draftDecision.conditions = c.memo.conditions.text; }
+  else if (act === "record") {
+    readDecisionForm();
+    const dd = draftDecision;
+    if (!dd.choice) { $("#decMsg").textContent = "Choose a decision."; return; }
+    if (!dd.rationale.trim()) { $("#decMsg").textContent = "Add your rationale. It is required."; return; }
+    if (dd.choice === "Approve" && !dd.grade) { $("#decMsg").textContent = "Choose a risk grade before approving."; return; }
+    const map = { "Approve": "approve", "Decline": "decline", "Request more information": "more", "Escalate to Credit Committee": "escalate" };
+    c.decision = Object.assign({}, dd, { at: nowISO(), override: map[dd.choice] !== c.rec.kind });
+    c.status = { "Approve": "Approved, pricing in progress", "Decline": "Declined", "Request more information": "More information requested", "Escalate to Credit Committee": "With Credit Committee" }[dd.choice];
+    audit(c, "You", `Recorded decision as ${dd.role}: ${dd.choice}${dd.grade ? ", risk grade " + dd.grade : ""}${c.decision.override ? " (differs from suggestion " + c.rec.label + ")" : ""}. Rationale: ${dd.rationale}`);
+    draftDecision = { role: dd.role === "Underwriter" && dd.choice.startsWith("Escalate") ? "Credit Committee" : dd.role, choice: "", grade: "", rationale: "", conditions: "" };
+    save(); render();
+  }
+  else if (act === "reopen") { audit(c, "You", `Reopened the decision (${c.decision.choice})`); c.decision = null; c.status = "In credit review"; save(); render(); }
+});
+document.addEventListener("change", (e) => {
+  if (e.target.id === "decRole" || e.target.name === "decChoice") { readDecisionForm(); render(); }
+});
+function readDecisionForm() {
+  const g = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
+  draftDecision.role = g("decRole") || draftDecision.role;
+  const ch = document.querySelector('input[name="decChoice"]:checked'); draftDecision.choice = ch ? ch.value : "";
+  draftDecision.grade = g("decGrade"); draftDecision.rationale = g("decRationale"); draftDecision.conditions = g("decConditions");
+}
+function copyText(txt, msg) {
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(() => toast(msg), () => fallbackCopy(txt, msg)); else fallbackCopy(txt, msg);
+}
+function fallbackCopy(txt, msg) { const ta = document.createElement("textarea"); ta.value = txt; document.body.append(ta); ta.select(); try { document.execCommand("copy"); toast(msg); } catch (e) { toast("Select the text and copy it yourself"); } ta.remove(); }
+$("#fileInput").addEventListener("change", (e) => { const files = [...e.target.files]; e.target.value = ""; if (files.length) newCaseFromFiles(files); });
+const drop = $("#drop");
+["dragenter", "dragover"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.add("over"); }));
+["dragleave", "drop"].forEach((ev) => drop.addEventListener(ev, (e) => { e.preventDefault(); drop.classList.remove("over"); }));
+drop.addEventListener("drop", (e) => { const files = [...e.dataTransfer.files]; if (files.length) newCaseFromFiles(files); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll(".modal").forEach((m) => (m.hidden = true)); });
+document.querySelectorAll(".modal").forEach((m) => m.addEventListener("click", (e) => { if (e.target === m) m.hidden = true; }));
+
+/* interrupted runs from a previous visit */
+cases.forEach((c) => { if (c.run && c.run.running) { c.run.running = false; c.run.error = "The page was closed while the agents were working."; const s = c.run.steps.find((x) => x.state === "active"); if (s) s.state = "error"; } });
+renderSamples(); renderProviderPill(); render();
+</script>

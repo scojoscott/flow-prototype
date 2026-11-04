@@ -1,0 +1,1428 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+</head>
+<body>
+<title>NashFlow Deal Processor</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Mulish:wght@400;500;600;700;800&display=swap">
+<style>
+/* Layout: matches NashFlow Marketing Demo v2. White sidebar with NT mark, lender card and red active nav; main area with page title, breadcrumb, bordered cards, figure tiles and red-underlined tabs. */
+:root {
+  --bg: #ffffff;
+  --page: #ffffff;
+  --surface: #f7f7f8;
+  --ink: #1c1d22;
+  --muted: #6b6e78;
+  --line: #e4e5ea;
+  --accent: #d6001c;
+  --accent-ink: #ffffff;
+  --accent-soft: #fdecee;
+  --pass: #1f7a46;
+  --pass-soft: #e6f4ec;
+  --amber: #9a5b00;
+  --amber-soft: #fdf1dc;
+  --fail: #b8001a;
+  --fail-soft: #fde7ea;
+  --info: #3d5a8a;
+  --info-soft: #e8eef8;
+  --hl: #ffe27a;
+  --font: "Mulish", "Segoe UI", system-ui, -apple-system, sans-serif;
+  --mono: ui-monospace, "SFMono-Regular", Menlo, Consolas, monospace;
+  --r: 8px;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #17181c; --page: #121316; --surface: #1f2025; --ink: #f1f1f4; --muted: #a2a5b0; --line: #30323a;
+    --accent: #ff3a52; --accent-ink: #ffffff; --accent-soft: #3a161c;
+    --pass: #63d394; --pass-soft: #14291d; --amber: #f0b45c; --amber-soft: #2e2311; --fail: #ff6f80; --fail-soft: #34161b;
+    --info: #9db6e0; --info-soft: #1a2232; --hl: #6d5c14;
+    color-scheme: dark;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #17181c; --page: #121316; --surface: #1f2025; --ink: #f1f1f4; --muted: #a2a5b0; --line: #30323a;
+  --accent: #ff3a52; --accent-ink: #ffffff; --accent-soft: #3a161c;
+  --pass: #63d394; --pass-soft: #14291d; --amber: #f0b45c; --amber-soft: #2e2311; --fail: #ff6f80; --fail-soft: #34161b;
+  --info: #9db6e0; --info-soft: #1a2232; --hl: #6d5c14;
+  color-scheme: dark;
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { min-height: 100%; }
+body { background: var(--page); color: var(--ink); font-family: var(--font); font-size: 14px; line-height: 1.5; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+h1, h2, h3 { text-wrap: balance; margin: 0; }
+p { margin: 0; }
+.num { font-variant-numeric: tabular-nums; }
+
+/* App frame */
+.app { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 100vh; }
+.side { background: var(--bg); border-right: 1px solid var(--line); padding-block: 22px; padding-left: max(18px, env(safe-area-inset-left, 0px)); padding-right: 18px; display: flex; flex-direction: column; gap: 18px; position: sticky; top: 0; height: 100vh; overflow-y: auto; }
+.logo { display: flex; align-items: center; gap: 10px; }
+.logo .mark { width: 34px; height: 34px; border: 2px solid var(--accent); color: var(--accent); display: grid; place-items: center; font-weight: 800; font-size: 14px; letter-spacing: -.02em; }
+.logo b { display: block; font-size: 16px; font-weight: 800; line-height: 1.1; }
+.logo small { display: block; font-size: 10px; font-weight: 700; letter-spacing: .12em; color: var(--muted); }
+.lender { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; }
+.lender .k, .navlabel, .label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.lender b { display: block; font-size: 13.5px; line-height: 1.3; }
+.navgroup { display: grid; gap: 4px; }
+.navlabel { padding: 0 12px 4px; }
+.nav { display: flex; align-items: center; justify-content: space-between; gap: 8px; border: 0; background: none; text-align: left; padding: 10px 12px; border-radius: 6px; font-size: 14px; font-weight: 500; }
+.nav:hover { background: var(--surface); }
+.nav[aria-current="page"] { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+.nav:disabled { opacity: .45; cursor: default; background: none; }
+.nav .badge { background: var(--surface); color: var(--ink); border-radius: 999px; font-size: 11.5px; font-weight: 700; padding: 0 7px; min-width: 22px; text-align: center; }
+.nav[aria-current="page"] .badge { background: #fff; color: #b00018; }
+.side .foot { margin-top: auto; display: grid; gap: 8px; border-top: 1px solid var(--line); padding-top: 14px; }
+.side .foot .prov { font-size: 12px; color: var(--muted); }
+.side .foot .prov b { color: var(--ink); display: block; font-size: 12.5px; }
+main { padding-block: 26px 70px; padding-left: 32px; padding-right: max(24px, env(safe-area-inset-right, 0px)); min-width: 0; }
+@media (max-width: 900px) {
+  .app { grid-template-columns: 1fr; }
+  .side { position: static; height: auto; border-right: 0; border-bottom: 1px solid var(--line); padding-right: max(16px, env(safe-area-inset-right, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-block: 14px; gap: 12px; }
+  .navgroup { display: flex; flex-wrap: wrap; gap: 4px; align-items: center; }
+  .navlabel { display: none; }
+  .nav { padding: 7px 10px; font-size: 13px; }
+  .lender, .side .foot { display: none; }
+  main { padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+}
+
+/* Page head */
+.pagehead { display: grid; gap: 2px; margin-bottom: 14px; }
+.pagehead h1 { font-size: 19px; font-weight: 800; }
+.crumb { font-size: 13px; color: var(--muted); }
+.intro { color: var(--muted); font-size: 14px; max-width: 90ch; margin-bottom: 16px; }
+.proto { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--accent-soft); border: 1px solid color-mix(in srgb, var(--accent) 25%, transparent); color: var(--ink); border-radius: var(--r); padding: 8px 12px; font-size: 13px; margin-bottom: 18px; }
+.proto b { color: var(--accent); }
+
+/* Building blocks */
+.card { border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); padding: 18px; display: grid; gap: 12px; min-width: 0; align-content: start; }
+.card h2 { font-size: 15px; font-weight: 800; }
+.card .hint, .hint { color: var(--muted); font-size: 13px; }
+.cardhead { display: flex; gap: 10px; align-items: center; justify-content: space-between; flex-wrap: wrap; }
+.btn { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 8px 14px; font-weight: 700; font-size: 13px; }
+.btn:hover { border-color: var(--muted); }
+.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(.94); }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.btn.small { padding: 5px 10px; font-size: 12.5px; }
+.btn.link { border: 0; background: none; padding: 0; color: var(--accent); font-weight: 700; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.row.between { justify-content: space-between; }
+.grid2 { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
+.grid2.even { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+@media (max-width: 1150px) { .grid2, .grid2.even { grid-template-columns: 1fr; } }
+.stack { display: grid; gap: 16px; min-width: 0; }
+
+.chip { display: inline-flex; align-items: center; gap: 5px; border-radius: 6px; padding: 2px 8px; font-size: 12px; font-weight: 700; white-space: nowrap; }
+.c-green, .s-found, .o-pass { background: var(--pass-soft); color: var(--pass); }
+.c-red, .s-notpresent, .o-fail { background: var(--fail-soft); color: var(--fail); }
+.c-amber, .s-notconfident, .o-amber { background: var(--amber-soft); color: var(--amber); }
+.c-grey, .s-na, .o-na { background: var(--surface); color: var(--muted); }
+.c-blue, .o-unclear { background: var(--info-soft); color: var(--info); }
+.ref { border: 0; background: var(--accent-soft); color: var(--accent); border-radius: 4px; padding: 1px 6px; font-size: 11.5px; font-weight: 700; vertical-align: 1px; }
+.ref:hover { text-decoration: underline; }
+
+/* New case */
+.drop { border: 1.5px dashed var(--line); border-radius: var(--r); background: var(--surface); padding: 28px 18px; text-align: center; display: grid; gap: 10px; justify-items: center; transition: border-color .15s, background .15s; }
+.drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.drop p { color: var(--muted); font-size: 13px; max-width: 46ch; }
+.sample { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; align-items: center; border: 1px solid var(--line); border-radius: var(--r); padding: 12px 14px; }
+.sample b { font-size: 14px; }
+.sample span { grid-column: 1; font-size: 12.5px; color: var(--muted); }
+.sample .btn { grid-row: 1 / span 2; grid-column: 2; }
+
+/* My cases */
+.stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+@media (max-width: 900px) { .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.stat { border: 1px solid var(--line); border-radius: var(--r); padding: 14px 16px; background: var(--bg); }
+.stat b { display: block; font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.stat span { display: block; font-size: 13.5px; }
+.stat small { display: block; font-size: 12.5px; color: var(--muted); }
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); }
+.tablewrap.bare { border: 0; border-radius: 0; }
+table.t { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+table.t th { text-align: left; font-size: 12px; color: var(--muted); font-weight: 600; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--surface); white-space: nowrap; }
+table.t td { padding: 11px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+table.t tr:last-child td { border-bottom: 0; }
+table.t td .sub { display: block; font-size: 12.5px; color: var(--muted); }
+table.t tr.group td { background: var(--surface); font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); padding-block: 6px; }
+.fv { font-weight: 700; font-variant-numeric: tabular-nums; }
+.note { font-size: 12.5px; color: var(--muted); }
+
+/* Case header */
+.casecard { border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); padding: 18px 20px; display: grid; gap: 12px; margin-bottom: 18px; }
+.casecard .titleline { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.casecard .cref { font-size: 13px; color: var(--muted); font-weight: 600; }
+.casecard h2 { font-size: 20px; font-weight: 700; }
+.casecard .subline { font-size: 13px; color: var(--muted); }
+.tiles { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 1200px) { .tiles { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+.tile { border: 1px solid var(--line); border-radius: 6px; padding: 9px 12px; min-width: 0; }
+.tile .k { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--muted); }
+.tile .v { font-size: 18px; font-weight: 800; font-variant-numeric: tabular-nums; line-height: 1.3; overflow-wrap: anywhere; }
+.tile .s { font-size: 12px; color: var(--muted); }
+.tile.green { background: var(--pass-soft); border-color: color-mix(in srgb, var(--pass) 30%, transparent); }
+.tile.amber { background: var(--amber-soft); border-color: color-mix(in srgb, var(--amber) 30%, transparent); }
+.tile.red { background: var(--fail-soft); border-color: color-mix(in srgb, var(--fail) 30%, transparent); }
+.tile.blue { background: var(--info-soft); border-color: color-mix(in srgb, var(--info) 30%, transparent); }
+.tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); overflow-x: auto; margin-bottom: 18px; }
+.tab { border: 0; background: none; padding: 10px 14px; font-size: 14px; font-weight: 500; color: var(--muted); border-bottom: 2px solid transparent; white-space: nowrap; display: inline-flex; gap: 6px; align-items: center; }
+.tab[aria-selected="true"] { color: var(--ink); font-weight: 700; border-bottom-color: var(--accent); }
+
+/* Recommendation bar */
+.recbar { border: 1px solid var(--line); border-radius: var(--r); padding: 12px 16px; display: grid; gap: 8px; background: var(--bg); }
+.recbar .line { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; font-size: 13.5px; }
+.recbar ol { margin: 0; padding-left: 20px; display: grid; gap: 3px; font-size: 13.5px; }
+.stale { background: var(--amber-soft); border-radius: var(--r); padding: 10px 14px; display: flex; gap: 10px; flex-wrap: wrap; align-items: center; justify-content: space-between; font-size: 13px; }
+
+/* Memo */
+.memo-sec { display: grid; gap: 6px; padding-left: 12px; border-left: 3px solid var(--line); }
+.memo-sec header { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.memo-sec h3 { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); }
+.memo-sec .by { font-size: 11.5px; color: var(--muted); }
+.memo-sec header .grow { flex: 1; }
+.memo-body { max-width: 80ch; font-size: 14px; }
+.memo-body p { margin: 0 0 8px; }
+.memo-body p:last-child { margin-bottom: 0; }
+.memo-body ul { margin: 0 0 8px; padding-left: 18px; }
+textarea.ed { width: 100%; min-height: 150px; border: 1px solid var(--line); border-radius: 6px; padding: 10px; background: var(--bg); line-height: 1.5; }
+.legend { display: grid; gap: 4px; font-size: 13px; }
+.legend span { display: inline-flex; align-items: center; gap: 8px; }
+.legend i { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
+
+/* Agents at work */
+.timeline { display: grid; }
+.tl { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 8px; padding: 9px 0; border-bottom: 1px solid var(--line); }
+.tl:last-child { border-bottom: 0; }
+.tl .time { font-size: 12.5px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.tl b { font-size: 13.5px; margin-right: 6px; }
+.tl p { font-size: 13px; color: var(--muted); }
+.spin { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--accent); border-top-color: transparent; border-radius: 50%; animation: spin 1s linear infinite; vertical-align: -1px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+.errbox { background: var(--fail-soft); border-radius: var(--r); padding: 10px 12px; font-size: 13px; }
+.errbox b { color: var(--fail); }
+
+/* Source check */
+.fieldlist { display: grid; gap: 8px; }
+.frow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; text-align: left; border: 1px solid var(--line); border-radius: var(--r); background: var(--bg); padding: 10px 12px; }
+.frow:hover { border-color: var(--muted); }
+.frow.sel { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.frow .k { font-size: 12px; color: var(--muted); }
+.frow .v { font-weight: 700; font-size: 14px; overflow-wrap: anywhere; }
+.frow .chip { grid-column: 2; grid-row: 1 / span 2; align-self: center; }
+.frow .from { grid-column: 1; font-size: 12px; color: var(--accent); }
+.fgroup { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .1em; color: var(--muted); margin-top: 6px; }
+.docbtns { display: flex; gap: 6px; flex-wrap: wrap; }
+.docbtn { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 5px 10px; font-size: 12.5px; font-weight: 600; }
+.docbtn.used { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
+.docbtn.on { box-shadow: 0 0 0 2px var(--accent); }
+.pagebox { border: 1px solid var(--line); border-radius: var(--r); overflow: hidden; }
+.pagebox .ph { display: flex; justify-content: space-between; gap: 8px; flex-wrap: wrap; padding: 8px 12px; background: var(--surface); border-bottom: 1px solid var(--line); font-size: 12.5px; font-weight: 700; }
+.pagetext { padding: 12px 14px; white-space: pre-wrap; font-family: var(--mono); font-size: 12px; line-height: 1.65; max-height: 460px; overflow: auto; overflow-wrap: anywhere; background: var(--bg); }
+.pagetext mark { background: var(--hl); color: var(--ink); border-radius: 2px; padding: 0 2px; }
+.pageimg { max-width: 100%; display: block; }
+.sticky { position: sticky; top: 16px; }
+.edit-inline { display: flex; gap: 6px; flex-wrap: wrap; }
+.edit-inline input { border: 1px solid var(--line); border-radius: 6px; padding: 6px 9px; min-width: 0; flex: 1; background: var(--bg); }
+
+/* Policy */
+.flags { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.flag { border: 1px solid var(--line); border-left: 4px solid var(--muted); border-radius: var(--r); padding: 12px 14px; display: grid; gap: 6px; align-content: start; background: var(--bg); }
+.flag.red { border-left-color: var(--fail); } .flag.amber { border-left-color: var(--amber); } .flag.green { border-left-color: var(--pass); }
+.flag b { font-size: 14px; }
+.flag p { font-size: 13px; }
+
+/* Decision */
+.field { display: grid; gap: 6px; }
+.field label { font-weight: 700; font-size: 13px; }
+.field select, .field input[type="text"] { border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; background: var(--bg); width: 100%; }
+.choices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+@media (max-width: 600px) { .choices { grid-template-columns: 1fr; } }
+.choice { border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; display: flex; gap: 8px; align-items: flex-start; cursor: pointer; }
+.choice:has(input:checked) { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.choice.disabled { opacity: .5; cursor: not-allowed; }
+.choice small { display: block; color: var(--muted); font-size: 12px; }
+.signoff { border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; display: flex; justify-content: space-between; gap: 8px; align-items: center; }
+.signoff b { display: block; font-size: 13.5px; }
+.signoff span { font-size: 12.5px; color: var(--muted); }
+.audit { list-style: none; margin: 0; padding: 0; }
+.audit li { display: grid; grid-template-columns: 56px 150px minmax(0, 1fr); gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+.audit .who { font-weight: 700; }
+.audit .who.agent { color: var(--info); }
+@media (max-width: 600px) { .audit li { grid-template-columns: 50px minmax(0, 1fr); } .audit li .what { grid-column: 1 / -1; } }
+
+/* Modals */
+.modal { position: fixed; inset: 0; z-index: 20; background: rgba(15, 16, 20, .45); display: grid; place-items: center;
+  padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.dialog { background: var(--bg); border-radius: 10px; box-shadow: 0 10px 40px rgba(0,0,0,.25); width: min(760px, 100%); max-height: 100%; overflow: auto; padding: 20px; display: grid; gap: 14px; }
+.dialog header { display: flex; gap: 10px; align-items: center; }
+.dialog header h2 { font-size: 17px; font-weight: 800; flex: 1; }
+.provider-opts { display: grid; gap: 8px; }
+.cfg { display: grid; gap: 6px; padding: 10px 12px; background: var(--surface); border-radius: var(--r); }
+.cfg input { border: 1px solid var(--line); border-radius: 6px; padding: 7px 9px; background: var(--bg); width: 100%; font-family: var(--mono); font-size: 12.5px; }
+.cfg label { font-size: 12.5px; font-weight: 700; }
+.toast { position: fixed; bottom: calc(18px + env(safe-area-inset-bottom, 0px)); left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--bg); padding: 9px 16px; border-radius: 8px; font-weight: 700; font-size: 13px; z-index: 30; }
+</style>
+
+<div class="app">
+  <nav class="side" aria-label="Main">
+    <div class="logo"><span class="mark">NT</span><span><b>NashFlow</b><small>NASHTECH</small></span></div>
+    <div class="lender"><div class="k">Lender</div><b>Demo lender (prototype)</b></div>
+    <div class="navgroup" id="navCases"></div>
+    <div class="navgroup" id="navAdmin"></div>
+    <div class="foot">
+      <div class="prov">AI provider<b id="providerPill">Checking</b></div>
+      <button class="btn small" id="openSettings" type="button">Change AI provider</button>
+    </div>
+  </nav>
+  <main id="main"></main>
+</div>
+<input type="file" id="fileInput" multiple hidden accept=".pdf,.txt,.eml,.md,.csv,.docx,.xlsx,.xls,.png,.jpg,.jpeg,.webp">
+
+<div class="modal" id="sourceModal" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="srcTitle">
+    <header><h2 id="srcTitle">Source</h2><button class="btn small" type="button" data-close>Close</button></header>
+    <div id="srcBody"></div>
+  </div>
+</div>
+
+<div class="modal" id="settingsModal" hidden>
+  <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+    <header><h2 id="setTitle">AI provider</h2><button class="btn small" type="button" data-close>Close</button></header>
+    <p class="hint">Keys are saved in this browser only and sent only to the provider you choose. Inside the NashFlow link, only "Claude (built in)" can be used, because the page cannot reach other sites. The other providers work when you open the downloaded copy of this page from your computer.</p>
+    <div class="provider-opts" id="providerOpts"></div>
+    <div class="row" style="justify-content:flex-end"><button class="btn primary" id="saveSettings" type="button">Save</button></div>
+  </div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js"></script>
+<script>
+
+"use strict";
+const SAMPLES = {"clean": {"label": "Clean: \u00a3850k office refinance, Reading", "blurb": "Complete and consistent. 60% LTV, ICR 1.9x. Expect Approve, Underwriter decides.", "files": [{"name": "Broker email.txt", "type": "text/plain", "text": "From: Amy Fenwick <amy@fenwickcf.example>\nTo: deals@lender.example\nDate: Mon, 2 Nov 2026 09:14\nSubject: New enquiry - Thamesgate Property Holdings Ltd - Kennet House, Reading - \u00a3850k refinance\n\nHi team,\n\nPlease find attached a refinance enquiry for an existing client of ours.\n\nBorrower: Thamesgate Property Holdings Ltd (company number 13874521)\nRegistered office: 14 Kings Road, Reading RG1 3AR\nDirectors: Daniel Okafor and Priya Raman, both happy to give personal guarantees.\n\nProperty: Kennet House, 41 Abbey Walk, Reading RG1 3BH. Freehold multi-let office building, four floors, fully let to four tenants.\nThe borrower bought the building in 2019 and already owns it.\n\nLoan requested: \u00a3850,000 to refinance the existing facility with another lender.\nTerm: 5 years, interest only.\nProposed pay rate: 7.25% fixed.\n\nValuation: Harcourt Lane Chartered Surveyors valued the property at \u00a31,420,000 on 15 September 2026 (report attached).\nRent: passing rent is \u00a3118,500 per annum per the attached tenancy schedule.\nEPC: C.\n\nThe directors have run a portfolio of six commercial investment properties in the Thames Valley since 2014, with no arrears and no adverse credit.\nLatest accounts to 31 March 2026 are attached.\n\nKind regards,\nAmy Fenwick\nDirector, Fenwick Commercial Finance\n\nFictional sample prepared for the NashFlow prototype. Any resemblance to real companies or people is coincidental.\n"}, {"name": "Accounts summary - Thamesgate FY2026.pdf", "type": "application/pdf", "b64": "JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgOCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCA3IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9QYWdlTW9kZSAvVXNlTm9uZSAvUGFnZXMgNyAwIFIgL1R5cGUgL0NhdGFsb2cKPj4KZW5kb2JqCjYgMCBvYmoKPDwKL0F1dGhvciAoXChhbm9ueW1vdXNcKSkgL0NyZWF0aW9uRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9DcmVhdG9yIChcKHVuc3BlY2lmaWVkXCkpIC9LZXl3b3JkcyAoKSAvTW9kRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9Qcm9kdWNlciAoUmVwb3J0TGFiIFBERiBMaWJyYXJ5IC0gXChvcGVuc291cmNlXCkpIAogIC9TdWJqZWN0IChcKHVuc3BlY2lmaWVkXCkpIC9UaXRsZSAoXChhbm9ueW1vdXNcKSkgL1RyYXBwZWQgL0ZhbHNlCj4+CmVuZG9iago3IDAgb2JqCjw8Ci9Db3VudCAxIC9LaWRzIFsgNCAwIFIgXSAvVHlwZSAvUGFnZXMKPj4KZW5kb2JqCjggMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggMTE2MQo+PgpzdHJlYW0KR2FzYW85OVwqZyUpMlU/aTctLmQ8MGE3KT40KnUnREJHKD5haTlbbXBkMzByUl8nM287UkAsO3FndTNKRW44W21AblJNIkowK2R0ISFSc11sTXBHZ2k4IyNwXFloXDEvQFJtLi4iVUpNcGhgJWdEYWxCTmM2QnUxJE9Vc2ZiO2NEdUxMVDheayZIK2tCUFdqTVo6JzxSLiFHazVGNjgpOTo2YCY1J05XKGA7c2dFZC1oc0dkMkctM2JuQmwuQUAvMHJLMmZATStwakhqcFFNJ3FtQ2U2RmwtaFlGVjsyRXU7VGEvRjJXblt1MSFkdUtLZEsjOTVIJzBwJF87Ilk6YUoyKCYpcVpWbEZLUyI0W0RgQkllQCgqS0FcZF5aUz43aF1vYGZDakt0aT5gR0pGTEUlSUlPPGU7KD1Eam9nI1VwVkolbEk8Kix0cT9CMSNCRCFmQ0dlWHAzOGdldFRrTERrJkpVPUtkVT1VQyFGOFVySDFzO1Zob2hNbE1oJDoqZChiPiJHQE1lLGNBZUBhOHBtTFwkIiFfN09BZTdpVl9oSERDSyg8dFhvXEBfSEEhZm9UJmw2aTpcOUVgTU1DKEcwU0cnMmUzYGsmI2lsP1RkTFQybWtJTyN0NzlvI2AkcHVAVDEpWWpMRipcYjtGQ1NnWCZQUztoVlYxYy0uLT1oXkgkXWMqLFxAO18qSjBGTkApbWpOTz9JY0oqLWRzUUlKZzpeUStmaTRwM2RsXT1TRFJCKlF0Nz1gbikiOUQpRSZDazxCclBSWlk7MDg1MFpEUGBbKz4oZWk3PEMvP0MvM01cPCxkNTBnK1dVTjc+IzttR1c3SG1IITtpcDtoW0oqTmYxWFhhblZVMGpXQS8wJSl1JjY7ZVdTNlRoViUyVDxXYVY7RTBJU05FJiozYm0mRjcsVUdjVlJTLTpJTT9jPTlXXDgxTi5YakgzNTFSTjlZQFEvcFsxXz1xR2cuVmZKY1FaUzg2P1p1OCFNOV4hNUgoISsvWnBHQGZqUU83dFtJSkE1Rlk1UXAlTExqWyRjZyhZSEg3QSlNYVBcS2IrP1JlITk5ZGBMSW0nYzxbbzI0IzxfciM0TkFUcjdiVzs1QE5YPUs0cjNESF1BOGoqN0NoLk5KVF0yOmknMFtcWT45NVVFNSNncy9jJGZWTi9FVCxTOj5YY01uaDdKYD5GTWgqSCthVldxVkNRI1xgNWRURlJCKWolY0g6KCRKRHVpbXI3M2BUaVUoLFA+Vz1WbUY7X2NbJCNQN1cvJ0k9KWBkKmhJJ1wiWHEtWWE5KkImdUFsKEJlS3MmWmU3TVBKXHMkMDlKPyxQW3BqYlxecVY/Zj9YYThmJHBCWmJSYiNpV1EmUCFaamBZb0lHNjspSjlgP1RuRDNvJyJZbHRwJT89cEwpbSxSWGE/PkYuY3VJLjs9NGhGOWYoJD5vTFtRRUhUMEhJWllYMktIXGw1SHFVV19rUUt1Q0glVydOXlU1Y006ZEBLSk1mWlZEVDwmSGtaWSxhSXAhRk1IQEIpX3RwUENwVX4+ZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgOQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwNjEgMDAwMDAgbiAKMDAwMDAwMDEwMiAwMDAwMCBuIAowMDAwMDAwMjA5IDAwMDAwIG4gCjAwMDAwMDAzMjEgMDAwMDAgbiAKMDAwMDAwMDUyNCAwMDAwMCBuIAowMDAwMDAwNTkyIDAwMDAwIG4gCjAwMDAwMDA4NzIgMDAwMDAgbiAKMDAwMDAwMDkzMSAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9JRCAKWzxjNzQ0MGI3MTAzNjBjODA4YzUyYjY3OGE3NmY3ZTQwMj48Yzc0NDBiNzEwMzYwYzgwOGM1MmI2NzhhNzZmN2U0MDI+XQolIFJlcG9ydExhYiBnZW5lcmF0ZWQgUERGIGRvY3VtZW50IC0tIGRpZ2VzdCAob3BlbnNvdXJjZSkKCi9JbmZvIDYgMCBSCi9Sb290IDUgMCBSCi9TaXplIDkKPj4Kc3RhcnR4cmVmCjIxODMKJSVFT0YK"}, {"name": "Tenancy schedule - Kennet House.pdf", "type": "application/pdf", "b64": "JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgOCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCA3IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9QYWdlTW9kZSAvVXNlTm9uZSAvUGFnZXMgNyAwIFIgL1R5cGUgL0NhdGFsb2cKPj4KZW5kb2JqCjYgMCBvYmoKPDwKL0F1dGhvciAoXChhbm9ueW1vdXNcKSkgL0NyZWF0aW9uRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9DcmVhdG9yIChcKHVuc3BlY2lmaWVkXCkpIC9LZXl3b3JkcyAoKSAvTW9kRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9Qcm9kdWNlciAoUmVwb3J0TGFiIFBERiBMaWJyYXJ5IC0gXChvcGVuc291cmNlXCkpIAogIC9TdWJqZWN0IChcKHVuc3BlY2lmaWVkXCkpIC9UaXRsZSAoXChhbm9ueW1vdXNcKSkgL1RyYXBwZWQgL0ZhbHNlCj4+CmVuZG9iago3IDAgb2JqCjw8Ci9Db3VudCAxIC9LaWRzIFsgNCAwIFIgXSAvVHlwZSAvUGFnZXMKPj4KZW5kb2JqCjggMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggMTIxNAo+PgpzdHJlYW0KR2F0JSI/JCMhYCdSZi5HZ250WG82XFFlOEAudTg7L0Q0X25CZj0uLj9oLEQiIW8+ZE1Qc21NLHFuOC5FZ0pEXnBAPWcqITNWIz5yYjBqaWRuXGEuK1tLajxMXzBqQFRFRUttVCRWOlcpOCwwSFtyJWhhajE/S2lXSC0wTSw7TmVzUTZRVXVdJGdbMF9CNDEsJjRGdSQoQkI2ajs0IVdwM14/SjdVVTxIQS9BTlJGXyhAakVaO2pPNzpuNiRiXjNKM0YwaDBMWUtuQCdnW2NlcTZMOWpWXiVfITJsPzUvUXNSSk8rOFRmb0lsJDBETilELC85W1g9RCpHWUJzJCcicG9OUkNCWHJdZSQtWi9dPiV0K3FWNFBNPC1oYWsiJDciTTRYK1NwYUtQOzVcXyRWNy5BZDR0MkA7dFlMMThFRHUiL2U3LjVFUk1ObT8+M2pMXzJtVjInYFh0KydgLEw/WU9kIlY1Jy9ETmAsWTtgQWw5WWhFSU9hP243RiVmYlJrW10mdWZzOE8/WWdWb3FDVWglUzEnS2FFVDxnLUsiZWMja1JxIV5hZiMiMkRxKl5kNWQlb1RiM0psXEZkX2M1O0JeZiRQUDhXJEc+M2teYSEvIlhBLVorLDI9KmZDOGw7I2MhOmZKJDVeRElaQ2g6QUNSXmJHTFFsIk5eTS0sYlxFNzYzb0JAIU9kP15LOGw7KlBUIi45SERJLFs/aVllUzdnb3EiKl9gPF8+XC5JPyc+OTRqOG42YzdhYys4R3MnWygvcG9uTmtsNlBQWk9bRU5iTjpxWGZEKDVoUV5PXVYjWzREOjYoKlpxI3AlO0xfYzMvX1pXZTpNcyZWaCgqZjZ0ZjlaI1twRjUicGooX1FMTFxCM1ROaHAmQFdCS15XSzcrPT9TODBHR1k+YTJ0M2claVklQ21wUnA5QVZeOnJxcEE0JGhsKCJXTFEpM08nb09iOTVJIjovIkJhSjszRSg4aTVEcVg1dWdtXSlVLztsai5qNUgtYkByRCFgVD1PMlw5QlBsVDJdWGxIMU4nI25qNSttMllUWTpQaFIlcWpEby1oPClEaWAzZ1RpVC8obWpdYk4kWXNqUyYrOTZcVXNsOG1pNV8yXUtib2NnT3EsSCxPT0xlbmhAbmZvJWxJY3A/YC9mTnNrYUpVOWtgMUI+O2tOQTs7JWsuMSg+RSo7SkZPImhyR2tgIXEsR1U4NitVNlFaWzsvODVvQTZRXkIpRj4mY2RiRUtQOVxocmEtSVsyTmlcRlM9V15bSzMnTkVqRz1ndSJhQ2oyX3RaYExIYVI0USwjRmJKc0wvKF1ROD9kKTdiVHFqIjQ0LXFTXm9jMlZNKG1ZViZRSF89bExBXDRCVU5idWgmXS5IakQpcCQ0ZkJFblszJ1NjLD0oRS0oa208VVNDZDs8XClWciRuYTpEVmlEcl48NGsvVC5QRnFQbSk+PjonaDRZRXE6W1k7PkZiPmlxSHInZkg3bU0+YS0wRTpAYC9TJ2snTlBHaVh0XT9NQScxPFEqc1AkZllXNkgsNUZZNydeJixvQ0N0Y0I1Kyk2J09CVUw/KnRkRyFhXU1XUCRJRyU5YiQ3OURwUj8hUCE/bEgyfj5lbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA5CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDA2MSAwMDAwMCBuIAowMDAwMDAwMTAyIDAwMDAwIG4gCjAwMDAwMDAyMDkgMDAwMDAgbiAKMDAwMDAwMDMyMSAwMDAwMCBuIAowMDAwMDAwNTI0IDAwMDAwIG4gCjAwMDAwMDA1OTIgMDAwMDAgbiAKMDAwMDAwMDg3MiAwMDAwMCBuIAowMDAwMDAwOTMxIDAwMDAwIG4gCnRyYWlsZXIKPDwKL0lEIApbPGI2YmRkMWQxNjRjZjU5NTJmNTVjMTZhY2I0YTI2ZWJmPjxiNmJkZDFkMTY0Y2Y1OTUyZjU1YzE2YWNiNGEyNmViZj5dCiUgUmVwb3J0TGFiIGdlbmVyYXRlZCBQREYgZG9jdW1lbnQgLS0gZGlnZXN0IChvcGVuc291cmNlKQoKL0luZm8gNiAwIFIKL1Jvb3QgNSAwIFIKL1NpemUgOQo+PgpzdGFydHhyZWYKMjIzNgolJUVPRgo="}, {"name": "Valuation report - Kennet House.pdf", "type": "application/pdf", "b64": "JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgOSAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCA4IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9Db250ZW50cyAxMCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCA4IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago2IDAgb2JqCjw8Ci9QYWdlTW9kZSAvVXNlTm9uZSAvUGFnZXMgOCAwIFIgL1R5cGUgL0NhdGFsb2cKPj4KZW5kb2JqCjcgMCBvYmoKPDwKL0F1dGhvciAoXChhbm9ueW1vdXNcKSkgL0NyZWF0aW9uRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9DcmVhdG9yIChcKHVuc3BlY2lmaWVkXCkpIC9LZXl3b3JkcyAoKSAvTW9kRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9Qcm9kdWNlciAoUmVwb3J0TGFiIFBERiBMaWJyYXJ5IC0gXChvcGVuc291cmNlXCkpIAogIC9TdWJqZWN0IChcKHVuc3BlY2lmaWVkXCkpIC9UaXRsZSAoXChhbm9ueW1vdXNcKSkgL1RyYXBwZWQgL0ZhbHNlCj4+CmVuZG9iago4IDAgb2JqCjw8Ci9Db3VudCAyIC9LaWRzIFsgNCAwIFIgNSAwIFIgXSAvVHlwZSAvUGFnZXMKPj4KZW5kb2JqCjkgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggMTA4MQo+PgpzdHJlYW0KR2F0VXI5aUtlIyY7S1pMJ21rVW9sV1QwMWlhXFljZy1VUSo6T0QmcDMtK0I6UTxbIjlhaFI6Ok0tVkoyS25LYkAvP1NPM1pSXWF0IjlTSzRwSE5RcjosO1RgN1kiPVYkNlojYTY/V1stWmNTZ0dmdDgyJDU+R29iK01qc1kqIyY1alJLSTInYjZdWVs1cj09dDVzWWknW1hzYElcWUJQMEVuTWxEUVY7P1gvWFxBIW5ISV1qbEBILjdkYDdJSksnXSVOSSJTJmhTOy9hWiYoZildUlVALnFGOGdnQipBYHJwVFFodCFVNiNePWNUPWNyRjBWW14nJiQqZztLRTxBOCVOSVNWSDNIM1lDTihdIjRXTWY3KmhhU2pzXW1JYSU7I2VPMj9gLkt1Q15QXnNUUVEvUVpPQSwyMC1RSWpNMF0pRlZ0RGtvMUZqKW47ISNqclQwWTUwaT49Ils/L2dnT2lfVT5WXjNDI3UiLElHLmtRdCovNlhzREdLTVQkWmUjaVRUYllCaUhpVFNMSFlzYT88XiMyUVkqS2UsKXVRPjhVbiU/WkBJXlpIUTVeQDg8TzhIR1xfT1trNmJsZmo4Sk0iZT1VWDs8QzQvV0loVV80OF1ZLTM7VWVyKSRsPS87JVJoOkhjNG9GZlkzNFhhOFtyZ3Veb1o3QkdtOltXWHU9aS0pR2MvP01DUmRDbWpiZyQ0Qk8pZE0kNVUyUk0pbSFDWEZqTltEX3EnNjBjXmghOyU/XSUiLypHRVVTRlBBQChBXj9fO3FlJTRSVHU3UGRUK0BQdSdqPnA2SmtvcSU+S1JlQWVGQnRFIVE9JXJTNF1cKTdiRTFSPD5IUSNZOShYZyksSmNJNUc/NDBKLWY9IjlmR1ota2FcW00xYVY+Q2o/I3FnMVI3RV5dcV0rRmdoPT1EdUZLTT0jXyU1aG5JRWhRPWghak5cciQuMVZXVVA1MD5FUXRsIS0yOScqXXA5bGYxRz0nL2JoY0UubmJbK11jWD9dcUhUbzlNKltlZlM3XjQlJiIoQF9wJCZQRyU2ays/VTFHMSQxMTpyQ1o5RjohRGMjLXVFI0lgLyJTKSRKTlNnQGtjTmQ9J19ERFNoQ0RpRW08T1c0JjdCdDJGSmBXSnVBNl4qSTpLIT9WQGRsNVRxIk9YLm1HZSQ9SjJkSjVrVkhoOGtoNS9hVVNrRWxtRylIOT8qZVRkdSxPPT9HYzZ0MidbIWhuUzF1OilXJFhpJWpKL2dNQV9EV1JAWXIvZ0VgOEQwNXExaVwpQjJadTlbPVdJcygwcCg7RTk7O0BaLHVVck1jaV5JT1c1c0w+aEUpOTxRXXJXNF1sb0xjPkBvL0ZEPi5IJyRpXzhodXNram48M3JRKi8kL2EqcGpXdE0rayFZXzZIVVI8RkpVUEw9bXFUQ09bXjswX2wpbzwzJ1h+PmVuZHN0cmVhbQplbmRvYmoKMTAgMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggNjUyCj4+CnN0cmVhbQpHYXQ9Jz8nIUdnJjpFck1Ra3VQI1NeS1IrVSNjX1k8LU01K2lZcUBULUNgJDVmWU1RMmprbUUhRSQlK1VvbjRNTCs4NCJIYllBamFJJllSdTFyLzhvZSRYZCJPXVBCTkE8KSVpMERYXSc3L105OlYrSipmPHNnJVQvNlFTUWldPnFmU1tRRmJfP2ZFPTFkZytSQC85bDUnWSgzNlM5QlVbJWJkMzNINSN0cz07LUohYUY+Q2AtXFVDUTNfLTM5KEozTV4sOmdzKU5BPHVTUl11KzsvV0pOJkZLY0drNFkjPW83LVErQ24uJkg6L0hXPzYiP0BrTilWPVlbUVVtaDcmZFhZP0tsOU0kTmwyKiwpYj89STMxPHNlcSQvJ0UsOzw6YTg6Qk0jK2tHQDVvP0RxJF4+XUIsNHI0bWYzQ2tzPzI5cC5nWkkmbTY7TV1yOk5DSSY7N2c4WSkrIkpFTWFhKy8lVFk+aUtvdUluZWpDPXQmMCxBbFxbTzpoUDhWK3NFXXVoPCMiNm4vWVFfIT00NUtFXmlcQUtnNig3L1lhT0NyMTsyMSVqVDdyMz1wMilhLyNePkBjJ0NwLCE0bVYtVCM8X1htW0IhK1lpR2RjdTFOYldEXTEjdUFqSmdWKyJLVVovIztwaEFCZ0hIVGpuRV5yWVtbbiE2V3FfNXQjZS06O1JTQEVGWzxSXCFvLV5PIyYjQE9iOC89ImhpZzYjK0osJDRPSS0vXS0nVHFGTzNNYTYjWF5tPTwvUkY1PCchY0dlWDRQb0UtI00mTVRxcW1hZ3FfbzFDM0VYOTRBSFM8Z2smSl5DKyckNihVckgvT0wmKTdyWk90VzEiUSZwSVNCX0BHYEZkSH4+ZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgMTEKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDYxIDAwMDAwIG4gCjAwMDAwMDAxMDIgMDAwMDAgbiAKMDAwMDAwMDIwOSAwMDAwMCBuIAowMDAwMDAwMzIxIDAwMDAwIG4gCjAwMDAwMDA1MjQgMDAwMDAgbiAKMDAwMDAwMDcyOCAwMDAwMCBuIAowMDAwMDAwNzk2IDAwMDAwIG4gCjAwMDAwMDEwNzYgMDAwMDAgbiAKMDAwMDAwMTE0MSAwMDAwMCBuIAowMDAwMDAyMzEzIDAwMDAwIG4gCnRyYWlsZXIKPDwKL0lEIApbPDhhN2U5MjVlMGE3MGM1M2M0OGVjOTcyZWI5N2QzODRiPjw4YTdlOTI1ZTBhNzBjNTNjNDhlYzk3MmViOTdkMzg0Yj5dCiUgUmVwb3J0TGFiIGdlbmVyYXRlZCBQREYgZG9jdW1lbnQgLS0gZGlnZXN0IChvcGVuc291cmNlKQoKL0luZm8gNyAwIFIKL1Jvb3QgNiAwIFIKL1NpemUgMTEKPj4Kc3RhcnR4cmVmCjMwNTYKJSVFT0YK"}]}, "incomplete": {"label": "Incomplete: \u00a32.4m industrial purchase, Leeds", "blurb": "Broker estimate only, no rent roll, old accounts. Expect Request more information.", "files": [{"name": "Broker email.txt", "type": "text/plain", "text": "From: Tom Ridley <tom.ridley@pennineloans.example>\nTo: deals@lender.example\nDate: Tue, 3 Nov 2026 16:42\nSubject: Purchase - Stourton Trade Park, Leeds - 2.4m\n\nAfternoon,\n\nQuick one for you to look at. My client Calder Works Investments Ltd is buying Units 3 to 5, Stourton Trade Park, Leeds LS10 1XY.\nIt's an SPV, set up last year. Director is Mark Calder.\n\nPurchase price agreed at \u00a33,350,000. We think it's worth around \u00a33.5m, no valuation yet.\nLooking for \u00a32.4m over 10 years.\n\nBoth units are let. I'll send the rent roll and leases next week.\n\nAccounts for Mark's other company attached so you can see the background.\n\nCheers,\nTom\nPennine Loans\n\nFictional sample prepared for the NashFlow prototype. Any resemblance to real companies or people is coincidental.\n"}, {"name": "Accounts summary - Calder Fabrication 2024.pdf", "type": "application/pdf", "b64": "JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgOCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCA3IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9QYWdlTW9kZSAvVXNlTm9uZSAvUGFnZXMgNyAwIFIgL1R5cGUgL0NhdGFsb2cKPj4KZW5kb2JqCjYgMCBvYmoKPDwKL0F1dGhvciAoXChhbm9ueW1vdXNcKSkgL0NyZWF0aW9uRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9DcmVhdG9yIChcKHVuc3BlY2lmaWVkXCkpIC9LZXl3b3JkcyAoKSAvTW9kRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9Qcm9kdWNlciAoUmVwb3J0TGFiIFBERiBMaWJyYXJ5IC0gXChvcGVuc291cmNlXCkpIAogIC9TdWJqZWN0IChcKHVuc3BlY2lmaWVkXCkpIC9UaXRsZSAoXChhbm9ueW1vdXNcKSkgL1RyYXBwZWQgL0ZhbHNlCj4+CmVuZG9iago3IDAgb2JqCjw8Ci9Db3VudCAxIC9LaWRzIFsgNCAwIFIgXSAvVHlwZSAvUGFnZXMKPj4KZW5kb2JqCjggMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggODkxCj4+CnN0cmVhbQpHYXNhbl8vZSFZJkFANldwKSNoWjg/c2QuZ2pnIkFWQSlYTkA+OV4qYUs6QTsiXixdYWhtOEpVYHNvI3NBLmksI1ZxbmdYZyhhXkk/UGBZNClXNiNKRGpDZUtMVENKJkxrK2gzNSVfLGMxVV1fRTo/NyFbKGFTbUI5JCkjbVJWPUoxUmktTltLMlcoWk49SXMma29GZzRoOUEwX0M4RUw1ZVs2dU1qXCIiO1xRY2IhbGpnPDcrNzBdVUxFX1c5Jk9kS0o7a1JEJz5zcVZwPE83OD1eOnFWLjFlZWpLNnFsUCheOTNhVzVaJ0c+YVwsVyJsXWZsK0RIbVInWi9CTFdDcF5MQFMhQDtHYDhGPlAzZEJWSiRoPUFNT1c3SUYiTlloWCgwTycpIjhia2ZbKSRtYSElbnE6KXRdU20/YShIK1A6J09ZXEpIRTVNWTpyYjdNODlgXENZRW5NaTI4ZUlLVzRrVGZoXl41Q043TkNmOmpJKyd1ciI4YEUtI15NWV1waGtgbz1FRC9EcGZ0RDdISz02dGMjSUhIYjNCYTQnOj1DM0EiZTM7I0xmK2tHZWJuMCo+PEsrNiVCUVpcOGlPayk9PSJoTGM9VD5eLCtbYDEpJHJfaHJ1TiMtLk5CS3VWdUJHMyktMlNSNTBkX3BWSk0tSm5Dcl0lJF1SOiY8a0VPPDZrPHEuJGksRFFmdGxkImdaYmQmJGldUissaFxMKmhYZWRjKSUtNW1mMWIiJSVER25fJ3JMNTVROUxfNDQ0SVkmajheUyZjNEVJWS5BZ1ZpMWxRYFonVlcqai4/JlJPVzlEJjM3XCh0PzVzXDpWcWA8KTMjbjpwIz5RO0RwPzladShVYz9xZ2ZeVl9bZFkiW3FYTCgkNGBrSS8xYjVSLXVmK1UuIW86XXRkNiFMZXMmRWhkcEQyUVxfWURvc1AmYSouLUUvZWs0R3E/aTM0TnQnNVFZbzFLWlwpS0RKXEY3Tzw4QGMkayE/SyVbcllCVi5qJG5BR2Z1RDs6WzhbbDpLaHA4ZmBERVVjWSUsXy87VEVwYjsvZyxwbVhlKGxVaUNHXWlHcDtSZjwvbzshbVlVMTY0VUxCQUArJCQrcldyWERbUFBXcG5sbl48XXVCNHVzLUdoI10zOENaP0cwRy5CJ2xHJENYS1duUGNAQilfaWRMI3Q7fj5lbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA5CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDA2MSAwMDAwMCBuIAowMDAwMDAwMTAyIDAwMDAwIG4gCjAwMDAwMDAyMDkgMDAwMDAgbiAKMDAwMDAwMDMyMSAwMDAwMCBuIAowMDAwMDAwNTI0IDAwMDAwIG4gCjAwMDAwMDA1OTIgMDAwMDAgbiAKMDAwMDAwMDg3MiAwMDAwMCBuIAowMDAwMDAwOTMxIDAwMDAwIG4gCnRyYWlsZXIKPDwKL0lEIApbPDdmZjM0MWY4MTgwOGFhMmU5NjlhM2Y4YWQ2NDA4YTkwPjw3ZmYzNDFmODE4MDhhYTJlOTY5YTNmOGFkNjQwOGE5MD5dCiUgUmVwb3J0TGFiIGdlbmVyYXRlZCBQREYgZG9jdW1lbnQgLS0gZGlnZXN0IChvcGVuc291cmNlKQoKL0luZm8gNiAwIFIKL1Jvb3QgNSAwIFIKL1NpemUgOQo+PgpzdGFydHhyZWYKMTkxMgolJUVPRgo="}, {"name": "Sales particulars - Stourton Trade Park.pdf", "type": "application/pdf", "b64": "JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgOCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCA3IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9QYWdlTW9kZSAvVXNlTm9uZSAvUGFnZXMgNyAwIFIgL1R5cGUgL0NhdGFsb2cKPj4KZW5kb2JqCjYgMCBvYmoKPDwKL0F1dGhvciAoXChhbm9ueW1vdXNcKSkgL0NyZWF0aW9uRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9DcmVhdG9yIChcKHVuc3BlY2lmaWVkXCkpIC9LZXl3b3JkcyAoKSAvTW9kRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9Qcm9kdWNlciAoUmVwb3J0TGFiIFBERiBMaWJyYXJ5IC0gXChvcGVuc291cmNlXCkpIAogIC9TdWJqZWN0IChcKHVuc3BlY2lmaWVkXCkpIC9UaXRsZSAoXChhbm9ueW1vdXNcKSkgL1RyYXBwZWQgL0ZhbHNlCj4+CmVuZG9iago3IDAgb2JqCjw8Ci9Db3VudCAxIC9LaWRzIFsgNCAwIFIgXSAvVHlwZSAvUGFnZXMKPj4KZW5kb2JqCjggMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggMTA3NAo+PgpzdHJlYW0KR2F0PSk5bG8mSSZBQEMybSY/YiU8MGxHSS4ubnByPGI9QmJqJF8rdVNhY2sxPHUpZD1URS1hKHFXa2JEOVViS0JCcyFMSykxKDVZZ1VFKUgic0xbSXMiJW84V3VRUnAwamtVUz5AOiRhNWVgIT1JLkI3KjpITmg5bjNzXWxPTzhRIWM1QWM4RTlMX1k1OVU0aE9FL0VYLCloJWw3aTRbVG1cX2FwX0RvWyRWYGReVG1tIlskXFxBJUg0dUxiLExxdFEzQjxcWUBkb0o+ZkNKYzsyI2xUI1FDVytaOkhHYlI8WUo4c1tyVyliVEY6Sm5GYTpJbygscj9KSXJDMS9Sb0olR2AlbStrX3FiVVxzTlhlTDktLzlPIThoOVFQSVhqWTpEIl8maG1rITctZVk5Slc9UGRPdDohaTUlTmcsbkE7R00sZkU+MFpHOW0mJ0BLJS90OyU9JmdbX2RVQjVLYVZTailrJys6ZWs0Sk8xZDBzb10tTj1LOCFwMSI+a3FcbFhcLihQYUpTPF9lUF0/aFJNLDxcaiVhXyRVJT1cYVNbbzRyNFMuYmtSdSxIPCdXU20yJUA0SkE/bl5tVyVSUU0yPSVhJUhrNU00InJzVWJYKik/Jl9uZlBNJGBkcVtSW1RcKkVbQk5hUitBLTYuJSlHJ0NlbCdeK0pKSF85J3JHLUxOV3J0QWwmLkQvMWI0UkhHI2M3WzhBIzU2P0FOOCVNPDdcZiI0Tk8wKiQxOz0yI25CRiEqM0IqSmI7TVFhTC8udUExJio3TGJEKHFpaVlVTCQzbW82UCxbNFBNXS5TZT51VXJtQS1LLkgvVywvNCRbVVEhbDRMLmFgUGs6Vz5qby4rZUFgZFVeRDpKa1clSGRvOEs/KDkwViFpKnBoSDU9ZG9FdW5xPVJYLjRpTUZxUEZVMXVmVENlMjo9aT9sVm5cIVkwU2VdY2o0YWtEW1wjQkUzNyI3UEtQKlRqR2o4PEVDY29LTCE/WFtYaDFLRFU2dD1USUhTQTRZTiJQOio0aWZBY0MnPUJVJXUrUj5vS1JnYmYvSXVyY2E6WWlaZlg2W2swRDk6PXIkJGMrJD1VNlJbbjYtY1kjNWNIOEkrM1VMUUAvLlMxRy5sR2NwdU9ZZi8ibTg7MzJTdHBtWi9RR2hiXm8zOTImZGksU1BvWmMsK19kWWIxZi0kU05ucSIqKUBIcUlFOTVeVzE4V2F0Y28kTWk5RzcqNGgnJ0ZAXjk4IzsyPzVqS3MnbkJscjdRZVEpajdJIzVvUiQ0L1JFbXU4SWdDS2FMN0IrKVRgbUJsRiheTChvXD01Q1hiTVtrV2FhUlhYXl8rNnI9bWVabCRUYTNEZWZWWFJAWSgyODYsKSxTJDd0WF89WW8hJ1QsM0VlS1s8NjprcDwtMkIhaVFncXVTP15XSDUlS34+ZW5kc3RyZWFtCmVuZG9iagp4cmVmCjAgOQowMDAwMDAwMDAwIDY1NTM1IGYgCjAwMDAwMDAwNjEgMDAwMDAgbiAKMDAwMDAwMDEwMiAwMDAwMCBuIAowMDAwMDAwMjA5IDAwMDAwIG4gCjAwMDAwMDAzMjEgMDAwMDAgbiAKMDAwMDAwMDUyNCAwMDAwMCBuIAowMDAwMDAwNTkyIDAwMDAwIG4gCjAwMDAwMDA4NzIgMDAwMDAgbiAKMDAwMDAwMDkzMSAwMDAwMCBuIAp0cmFpbGVyCjw8Ci9JRCAKWzw4MTUzYWQ4YzliNWU0Yjk5Y2EzMTNjNjM2YTM0MmM2ND48ODE1M2FkOGM5YjVlNGI5OWNhMzEzYzYzNmEzNDJjNjQ+XQolIFJlcG9ydExhYiBnZW5lcmF0ZWQgUERGIGRvY3VtZW50IC0tIGRpZ2VzdCAob3BlbnNvdXJjZSkKCi9JbmZvIDYgMCBSCi9Sb290IDUgMCBSCi9TaXplIDkKPj4Kc3RhcnR4cmVmCjIwOTYKJSVFT0YK"}]}, "inconsistent": {"label": "Inconsistent: \u00a31.6m retail parade refinance, Manchester", "blurb": "Email says rent \u00a3186k, tenancy schedule says \u00a3158k. Expect a mismatch flag and Escalate.", "files": [{"name": "Broker email.txt", "type": "text/plain", "text": "From: Ravi Sandhu <ravi@sandhufinance.example>\nTo: deals@lender.example\nDate: Wed, 4 Nov 2026 08:05\nSubject: Refinance request - Redmere Estates Ltd - Hulme Parade, Manchester - \u00a31.6m\n\nMorning all,\n\nPlease see below and attached for a refinance of a retail parade.\n\nBorrower: Redmere Estates Ltd, company number 11456209, registered office 88 Wilmslow Road, Manchester M14 5TQ.\nDirectors and guarantors: Joanne Redmond and Patrick Redmond. They have owned and managed retail and mixed-use property in Greater Manchester for over 15 years.\n\nProperty: 1 to 7 Hulme Parade, Stockport Road, Manchester M13 0QX. Freehold parade of seven shops. Owned by the borrower since 2017.\n\nLoan: \u00a31,600,000, term 7 years, interest only, to refinance the existing loan with a high street bank and release a little equity.\nPay rate we are looking for: 7.5%.\n\nIncome: \u00a3186,000 per annum.\nValuation by Pennington Rhodes at \u00a32,450,000 (August 2026), attached with the tenancy schedule.\nEPC: D across the parade.\n\nAccounts to 30 June 2026 attached. Clean credit, no CCJs.\n\nThanks,\nRavi Sandhu\nSandhu Commercial Finance\n\nFictional sample prepared for the NashFlow prototype. Any resemblance to real companies or people is coincidental.\n"}, {"name": "Accounts summary - Redmere FY2026.pdf", "type": "application/pdf", "b64": "JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgOCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCA3IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9QYWdlTW9kZSAvVXNlTm9uZSAvUGFnZXMgNyAwIFIgL1R5cGUgL0NhdGFsb2cKPj4KZW5kb2JqCjYgMCBvYmoKPDwKL0F1dGhvciAoXChhbm9ueW1vdXNcKSkgL0NyZWF0aW9uRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9DcmVhdG9yIChcKHVuc3BlY2lmaWVkXCkpIC9LZXl3b3JkcyAoKSAvTW9kRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9Qcm9kdWNlciAoUmVwb3J0TGFiIFBERiBMaWJyYXJ5IC0gXChvcGVuc291cmNlXCkpIAogIC9TdWJqZWN0IChcKHVuc3BlY2lmaWVkXCkpIC9UaXRsZSAoXChhbm9ueW1vdXNcKSkgL1RyYXBwZWQgL0ZhbHNlCj4+CmVuZG9iago3IDAgb2JqCjw8Ci9Db3VudCAxIC9LaWRzIFsgNCAwIFIgXSAvVHlwZSAvUGFnZXMKPj4KZW5kb2JqCjggMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggOTA5Cj4+CnN0cmVhbQpHYXQlIWhmJTQmJjpXZkdcNDlfNlQnW2R1WkZCY1xQSChXdEJqTi5WT3A5QzQsO0Y3dTNyXSNJJTEqNSlrV2s2XnBZR1lXNDVWJVxNSTVORmI4VDtDJVxHKlcobCpKPi8wWVxlR0FyYixyZiNKPi42JW5XY1BSciZRM3RIKSYmbSVUb3VkVW1ZaGw9L11MSU1uUic2Y1RcKXRcLzNObzlGRTc6OG1hOzQzZnIhTiFSYUtPdS5POChrXD5dZmVPQlI6YGlWZCcvZ1xGNkcoKCFRck9GbzxqSzBHX1daZHU7KWtcdWxGU0pPUyonOWomMyhFLmh1WlFrZ0gwSzZgYGRPYkYibWJpS2cyJEZmPWohaUs6YiVrbkpeY2hKYk4rRnMvPE9ZIWpdMy5AVGNOUmFlZ1VxZkRjIkgyNFA2ZWQsRz5bL0FoX1QiV1heMEM0ZkdAJCguVW9FMVJANkVSSWtrWC5mO0ZdWi1tPywvIiJIOydGbiU6bGVhSEQ0cDhOPExgKyk5TTclRlJ0XDFHbSg4QCFcaU08NCpdVl1pLztGJFRQISM0P0k/dCMyKSM8SjJlbFtnay9XWFdRYlc+ZVhDWkM3QlxLZEV1bWA2Y0U7byRHUj51MGRkbWVJX05fUVc1K105Ii5tSDpzPS4sJSgmVlFNOHBeMG02TD9OU0c2bDJGYEFgLV4jaltfKUVoYSdsSj4wTVdvO1BKSlY2M0ROdDtwayRlaCtJaT1nV0JuJGwvMnNqTjZeMkY4RjU7N1lUcFkwbVRdViZOQ15AVWhQOTkrazZPSE9tWmhoSyhcO2dgS0k4LkRTcUowT2RLQVBPRjNbWiVHcDZMOHFtYU8sTS1HLy9Ra0VjTC9OWylQQE4rcXFcKlJZLisqZzdCY1FlOVBabjlQWVgzVkNkZU9BKUldRCcjOm5RXXVJK21pTHNCYE9vN0R1SDtKblk9TzwxZVA1YWkpVVIlcDNTbSk8JjUnQ1RlTyYtSXMyaDdtTS9kW1xvQmxBWFVWcUZrOmJUW0pNcmI0VSUqW28rbTkpOmltZF5WYDA9aUMzLkBIZV1tLz9yazlhMkMuYjMwSz00RjpJS1Ulayg2SzwlTmsxdEk1Xi50IVoqQDhpVlpXVGokP1pDQyxmdWovOmtySzxfRj1rbTBrcEMyIiw5MnRNO0hcV1BNcWNtX1gxQFFMYThYIT8qdSFaKWddfj5lbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA5CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDA2MSAwMDAwMCBuIAowMDAwMDAwMTAyIDAwMDAwIG4gCjAwMDAwMDAyMDkgMDAwMDAgbiAKMDAwMDAwMDMyMSAwMDAwMCBuIAowMDAwMDAwNTI0IDAwMDAwIG4gCjAwMDAwMDA1OTIgMDAwMDAgbiAKMDAwMDAwMDg3MiAwMDAwMCBuIAowMDAwMDAwOTMxIDAwMDAwIG4gCnRyYWlsZXIKPDwKL0lEIApbPDMxMTY5OTk3Zjg4N2JkNDg0NDYzODg2ZTUwMzU2ZjcwPjwzMTE2OTk5N2Y4ODdiZDQ4NDQ2Mzg4NmU1MDM1NmY3MD5dCiUgUmVwb3J0TGFiIGdlbmVyYXRlZCBQREYgZG9jdW1lbnQgLS0gZGlnZXN0IChvcGVuc291cmNlKQoKL0luZm8gNiAwIFIKL1Jvb3QgNSAwIFIKL1NpemUgOQo+PgpzdGFydHhyZWYKMTkzMAolJUVPRgo="}, {"name": "Tenancy schedule - Hulme Parade.pdf", "type": "application/pdf", "b64": "JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgOCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCA3IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9QYWdlTW9kZSAvVXNlTm9uZSAvUGFnZXMgNyAwIFIgL1R5cGUgL0NhdGFsb2cKPj4KZW5kb2JqCjYgMCBvYmoKPDwKL0F1dGhvciAoXChhbm9ueW1vdXNcKSkgL0NyZWF0aW9uRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9DcmVhdG9yIChcKHVuc3BlY2lmaWVkXCkpIC9LZXl3b3JkcyAoKSAvTW9kRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9Qcm9kdWNlciAoUmVwb3J0TGFiIFBERiBMaWJyYXJ5IC0gXChvcGVuc291cmNlXCkpIAogIC9TdWJqZWN0IChcKHVuc3BlY2lmaWVkXCkpIC9UaXRsZSAoXChhbm9ueW1vdXNcKSkgL1RyYXBwZWQgL0ZhbHNlCj4+CmVuZG9iago3IDAgb2JqCjw8Ci9Db3VudCAxIC9LaWRzIFsgNCAwIFIgXSAvVHlwZSAvUGFnZXMKPj4KZW5kb2JqCjggMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggMTIxMAo+PgpzdHJlYW0KR2FzYXA+Qj84cCY6WEFXZlhLbV8nISlISGtaY0xva0wtL2kzNC4uaV1WcjdPZSlCOjI4Mkw4Pj5tWlQ5QGooPFs4RFw4TG4jK10uQ0MxMk9lQG9qQUpCSidyPHRtJzhqOlM/WnEyZWsha0BGLF9LIW40ZDQ7Im9lNkFWQy0jYD0oRS1KIzhqKDxBYF1XSVE2YTYzXkMrNkgwR2kibj85YXFdVVtTImRYdXBBP2UtW1tGcVBIRi9JZmhAcE1ELHMjYXIpSm01NTk8aDcsO0pwKy9vUSVnNyNKX14yYEtCKmdvbipqUEMjIi0mQGY7VUomcShWYW85W2xjVGgnVUEtWF1CZUplSjxUVEAnLWxKZEwmMD5bQipAM2ZDZWhXbWFdJFBxK2hFVSZMUC5DVFNaZFxFM1lvOSJCIihgKFRcRW9vKjtJayhrLG9rIXBWTXVFVTdaWF9aYEpIXl5xVUYlOS9lSE8wJ21gcCpRN2xuSCgsIk9UbFYwcTVtM1JTcW5HRiNHKiUzVGYtWzI/bENkUm9dJixUVitzQlwmOjdqKEhJMCZMQz1sMSg9P1xGMjVGZF9PNlIuWFw2LW8iJ2FcJSs2W1IxOmBlN25UN0dyR1VvM1xCMUheO3RxW2dSWmopYCwxRE9AOmc3RUEqNVlTJ0ZySUIzP19wRiE/QFIoLyZHQUhFLjZMQyxuU2o6JTxicFRfcWlDPV9SY2kwP1BPcEs9RnEmckRwW2xSZiciP05wI3BqRWIrL2N1aE9zZUYtPGNQYS1tK1F0K0dya2AlSXA2NSNBXT9rTyhJaWMncmBaQEMwbig3bTxfaVVXRnBDZ280LWFsanMtN3NMZDknNSpnN1IlQWA2RGxERidVTUlHMzRqVDtTKi86S1ctJlJoc2xWW2RgUWI1OkpiJVs5RkZfY1JcQ1VyZWBJcGc2KEEvJi1WQSQmNTRRclljam4rRz1pXEA/MShGRWtDa3RLW0FtZiw5aFRTOWxIYkIxaTMlNiszJHNoWkQ0LTtSUjFBcW8vck00OC5fKF1dMC45YzU8SmZEMmMjJ0skTm4kbjFVTTdCPSxzKmYvNmUrNTpFcXA7Ij9ycHNwWyE3Mm5wWGxxXEAnbSctT2k7JTI0NG5iZlJEIyVNbkAwcjxHOzFbX1M0UzdnPDluNT1YYVFWJT1AMUk7TyZDLGpHJEhrSzZQYkRtVkBXSjVzKmxXNVlcYzQnNGtHMDowUHJKVlhzOC49N2wvS0xoSEVMczYzYSdGIVYyJGFBInFiI1QwOTZHNCJDYltoMFcwYUc/LzBqcWp1P2A0KTw/RE5LME1RKiFpbiJjNSlMLTBRdTEnMyQzZl9WXy9UOiRxLlRiPURbX149YihcSmYyJSspR3JPbCdncGFWP2dVKDJaRyEmbDZiJiFzQnFSNUZackdKXSYlRGxXVEdvQDUmKVVzO2EoYWxNWiw8bDhZNyhyPGouYyZUZz1kW0IiaydLNFtwMEdIMz1ER1c9KVNYQC9HRW5GSEJJVzhRNTQiTz4rLFUuWVxKO1IvUjVAdHJyYCU1TzNBdEhfUVslbXVKQmlMQSlUJmt1TzQuUWprRmZBXT84cSlQcF1JKW5sckZ+PmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDkKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDYxIDAwMDAwIG4gCjAwMDAwMDAxMDIgMDAwMDAgbiAKMDAwMDAwMDIwOSAwMDAwMCBuIAowMDAwMDAwMzIxIDAwMDAwIG4gCjAwMDAwMDA1MjQgMDAwMDAgbiAKMDAwMDAwMDU5MiAwMDAwMCBuIAowMDAwMDAwODcyIDAwMDAwIG4gCjAwMDAwMDA5MzEgMDAwMDAgbiAKdHJhaWxlcgo8PAovSUQgCls8M2VmNDcxNzJjZWU0MGJmMmMwMTljOTAzN2IyNzkyMTA+PDNlZjQ3MTcyY2VlNDBiZjJjMDE5YzkwMzdiMjc5MjEwPl0KJSBSZXBvcnRMYWIgZ2VuZXJhdGVkIFBERiBkb2N1bWVudCAtLSBkaWdlc3QgKG9wZW5zb3VyY2UpCgovSW5mbyA2IDAgUgovUm9vdCA1IDAgUgovU2l6ZSA5Cj4+CnN0YXJ0eHJlZgoyMjMyCiUlRU9GCg=="}, {"name": "Valuation report - Hulme Parade.pdf", "type": "application/pdf", "b64": "JVBERi0xLjQKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSIC9GMiAzIDAgUgo+PgplbmRvYmoKMiAwIG9iago8PAovQmFzZUZvbnQgL0hlbHZldGljYSAvRW5jb2RpbmcgL1dpbkFuc2lFbmNvZGluZyAvTmFtZSAvRjEgL1N1YnR5cGUgL1R5cGUxIC9UeXBlIC9Gb250Cj4+CmVuZG9iagozIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhLUJvbGQgL0VuY29kaW5nIC9XaW5BbnNpRW5jb2RpbmcgL05hbWUgL0YyIC9TdWJ0eXBlIC9UeXBlMSAvVHlwZSAvRm9udAo+PgplbmRvYmoKNCAwIG9iago8PAovQ29udGVudHMgOCAwIFIgL01lZGlhQm94IFsgMCAwIDU5NS4yNzU2IDg0MS44ODk4IF0gL1BhcmVudCA3IDAgUiAvUmVzb3VyY2VzIDw8Ci9Gb250IDEgMCBSIC9Qcm9jU2V0IFsgL1BERiAvVGV4dCAvSW1hZ2VCIC9JbWFnZUMgL0ltYWdlSSBdCj4+IC9Sb3RhdGUgMCAvVHJhbnMgPDwKCj4+IAogIC9UeXBlIC9QYWdlCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9QYWdlTW9kZSAvVXNlTm9uZSAvUGFnZXMgNyAwIFIgL1R5cGUgL0NhdGFsb2cKPj4KZW5kb2JqCjYgMCBvYmoKPDwKL0F1dGhvciAoXChhbm9ueW1vdXNcKSkgL0NyZWF0aW9uRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9DcmVhdG9yIChcKHVuc3BlY2lmaWVkXCkpIC9LZXl3b3JkcyAoKSAvTW9kRGF0ZSAoRDoyMDI2MTEwNDExNDcxMiswMCcwMCcpIC9Qcm9kdWNlciAoUmVwb3J0TGFiIFBERiBMaWJyYXJ5IC0gXChvcGVuc291cmNlXCkpIAogIC9TdWJqZWN0IChcKHVuc3BlY2lmaWVkXCkpIC9UaXRsZSAoXChhbm9ueW1vdXNcKSkgL1RyYXBwZWQgL0ZhbHNlCj4+CmVuZG9iago3IDAgb2JqCjw8Ci9Db3VudCAxIC9LaWRzIFsgNCAwIFIgXSAvVHlwZSAvUGFnZXMKPj4KZW5kb2JqCjggMCBvYmoKPDwKL0ZpbHRlciBbIC9BU0NJSTg1RGVjb2RlIC9GbGF0ZURlY29kZSBdIC9MZW5ndGggMTIzMgo+PgpzdHJlYW0KR2F0VTJiQkRWdSZEY1kmQidKc09ZUVZxI2ZXSixrbWMuRUsvMUc5TGhTQTJDQTNwPkshNldeSEc1dDVsbUR1XTsqXiwmVDAucGloQXFrazQwQlUhVClXNnI+ci02MjIiZ0hoYCRiWywmZjVTOEFyQS5vPFEjWWEkQm9rKUBraGU0VykqTEslaGpOIzw2alRrIU5GPyorP2lWYWRKM2RUJS9mI2onLkNNXFE9O0VZXiVHMDNpMSFDIS0kbkJKMGVaJ1lYVjorZz9yPDpiOj05Xl9WM2xOOmpSNzVjNVRPW2ZSWW9KXEpdUD11K00xaWA4LkteV2hUVFdRMWBpTjE6ZnUqMzJEWDNhbHJVJTN1MFVdakJQRVFCS1dVQyE8V0VLaC8/S0IyNGhXS01JYCdjWllRcCZMLzZIS0ZzZmFlbz9VQHQyai83cjVSOCdxPG5KV1omMERmJkshL0BhXCJOYVpMMHA9OHRLLj0iKzMzPlloTFJLPFM0Mj9Faj9uIyUsPmJXVWNxYDlmT2I4ZWdFKGp1cSEmbzl0bUZRZUhDZ29qZFIlWmdxJTVpbTlrIyMwNzg/TmYjZmM/azQuTW5AbV9lZy1GUiRuWEkoYyJSJ2dVLXNEPmZvJydTYydPaTVkW2xaI0ZYYVFqJzBgMSFLNHFEPSVDdEBiZkc6NmsiQTFNXVE8MEhbQi9uQ2E5XiwtIiwsOEspW24ybjJYRFYjXUg4JysnXFFcdV8wTVFHSSViSWlXLDVZNk4uJ3NzXGxxR0NGQCpOKUpUT1JTZEBZQHNIZ2NMdGxdRnJRKnU/bFZaOGZfPj4nRXNkTU9DMWpZSEY/Y0pYPipIOVhySyMuVUszRS5EUlRhO2cmY3NbUj5NSVkySWQ9V1AncS1wQCknNjBgUjpoYlljOyctYlFxcCwoUDJYXVwpNS0jJjhAYFstbV1VNzo5aihEYGFJUStPZVxxdWZoayhuNSlfZU5zaSIsWzMpMG8wRWhUSzdyakkjaCxZVltiWSFScVwjTTNrRyszX1dNV2xIQjooI0RRaExkQDVQZ1Q4LiM7RUFVSVRUb0ROMzZfJkptZCxgMjpAaF8lO2pNal5NLF5kaFZOSSpfLicvbXNfTidGXUVEWWlNKzY1aTtPMU5pN2ZBJ29FSztjaENbWkU+OUJwNmRNTDFqRiJ1MEwiL0pyN1MqKjY6I0E9PDEmZiY5bkFDc1wzO2drU1w+LHAmdFhNZGZCRipdSlBMaShwRFpLUXBIS0hMYk0mZz1xOydGYjBJWCJuRCs7IzM6aTdRKk5AaU5tRWZHVixSU3JPJkwzblQqbWpOVSFsPTcnUWM2Nz5rMUZYXyJbVCNKKjVkbCwjYylEai9cNj03SyhZWCNDYlIqKWhoXSojVERHLm45LmRZbjklcCVkbUAvXmhgYkgwVygqUDhyWm8oVWdQJS8uPGpAWXJpO0dNU2otYCkoYF9MdF9KRUM4VmxkX20iSExjVmJaRHJJJS4uJSZTWTI/XjcmUCZgJVBMN1Q3dV1BJkJtKGdFcClvSSxxbEtXb1VrZExsbytzSExQOC0uSSVpO104Rz5HNk4qMDlfVDY5REUpQmU3LyE+RmlKPkssVzhpLE8yUm8sY0srJUg4My5hQDRsfj5lbmRzdHJlYW0KZW5kb2JqCnhyZWYKMCA5CjAwMDAwMDAwMDAgNjU1MzUgZiAKMDAwMDAwMDA2MSAwMDAwMCBuIAowMDAwMDAwMTAyIDAwMDAwIG4gCjAwMDAwMDAyMDkgMDAwMDAgbiAKMDAwMDAwMDMyMSAwMDAwMCBuIAowMDAwMDAwNTI0IDAwMDAwIG4gCjAwMDAwMDA1OTIgMDAwMDAgbiAKMDAwMDAwMDg3MiAwMDAwMCBuIAowMDAwMDAwOTMxIDAwMDAwIG4gCnRyYWlsZXIKPDwKL0lEIApbPDEwNWZiYmJmYmVmN2I0OTBlMjI5ZjhiY2E4MDllYWI3PjwxMDVmYmJiZmJlZjdiNDkwZTIyOWY4YmNhODA5ZWFiNz5dCiUgUmVwb3J0TGFiIGdlbmVyYXRlZCBQREYgZG9jdW1lbnQgLS0gZGlnZXN0IChvcGVuc291cmNlKQoKL0luZm8gNiAwIFIKL1Jvb3QgNSAwIFIKL1NpemUgOQo+PgpzdGFydHhyZWYKMjI1NAolJUVPRgo="}]}};
+
+/* ------------------------------------------------------------------ helpers */
+const $ = (s, el = document) => el.querySelector(s);
+const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const money = (n) => (n == null || !isFinite(n) ? "-" : "£" + Math.round(n).toLocaleString("en-GB"));
+const pct = (n, d = 1) => (n == null || !isFinite(n) ? "-" : n.toFixed(d) + "%");
+const times = (n) => (n == null || !isFinite(n) ? "-" : n.toFixed(2) + "x");
+const nowISO = () => new Date().toISOString();
+const timeOf = (iso) => new Date(iso).toLocaleTimeString("en-GB", { hour: "2-digit", minute: "2-digit" });
+const dateOf = (iso) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+const uid = () => Math.random().toString(36).slice(2, 10);
+function store(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); return true; } catch (e) { return false; } }
+function load(key, dflt) { try { const v = localStorage.getItem(key); return v ? JSON.parse(v) : dflt; } catch (e) { return dflt; } }
+function toast(msg) { const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; document.body.append(t); setTimeout(() => t.remove(), 2400); }
+function parseNum(v) {
+  if (v == null) return null;
+  if (typeof v === "number") return isFinite(v) ? v : null;
+  let s = String(v).toLowerCase().replace(/,/g, "").replace(/£|gbp|pa|per annum|p\.a\./g, "").trim();
+  let mult = 1;
+  if (/\d\s*m\b/.test(s) || /million/.test(s)) mult = 1e6; else if (/\d\s*k\b/.test(s)) mult = 1e3;
+  const m = s.match(/-?\d+(\.\d+)?/);
+  return m ? parseFloat(m[0]) * mult : null;
+}
+function parseDate(v) {
+  if (!v) return null;
+  const s = String(v).trim();
+  let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})/);
+  if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+  const d = new Date(s);
+  return isNaN(d) ? null : d;
+}
+function b64ToBytes(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+function parseJSONLoose(text) {
+  if (text && typeof text === "object") return text;
+  let t = String(text || "").trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) t = fence[1].trim();
+  try { return JSON.parse(t); } catch (e) {}
+  const a = t.indexOf("{"), b = t.lastIndexOf("}");
+  if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e) {} }
+  throw new Error("The AI reply could not be read as data. Try running the agents again.");
+}
+
+/* ------------------------------------------------------------------ policy (illustrative, flow doc v0.6 section 7.1) */
+const POLICY = {
+  name: "Illustrative policy (UK market standard)",
+  version: "Flow doc v0.6, section 7.1",
+  minLoan: 250000, maxLoan: 10000000, minTerm: 3, maxTermIO: 15, maxTermAmort: 25,
+  maxLTV: 70, maxLTVSingle: 65, minICR: 1.5, stressRate: 6.5, minDSCR: 1.25,
+  minWAULT: 3, concentration: 50, accountsMonths: 12, uwLimit: 1000000,
+};
+const JUDGEMENT_AREAS = [
+  { area: "Property type", clause: "7.1 Property type", rule: "Retail, office, industrial and mixed use. Specialist uses (for example petrol stations, hotels) by exception." },
+  { area: "Borrower", clause: "7.1 Borrower", rule: "UK limited company or SPV, with personal guarantees from principal directors." },
+  { area: "Tenant covenant", clause: "7.1 Income quality", rule: "Tenant covenant strength and quality of income." },
+  { area: "Experience", clause: "7.1 Experience", rule: "Borrower or directors have relevant property investment experience." },
+  { area: "Adverse credit", clause: "7.1 Adverse credit", rule: "No unsatisfied CCJs or insolvency events; explained historic adverse considered." },
+];
+
+/* ------------------------------------------------------------------ fields (requirements v1.0, BR-01 and section 7.1) */
+const FIELDS = [
+  { key: "broker", label: "Broker", group: "Application" },
+  { key: "purpose", label: "Purpose", group: "Application", hint: "Refinance, Purchase or Capital raise" },
+  { key: "loan_amount", label: "Loan amount", group: "Application", type: "money", mandatory: true },
+  { key: "loan_term_years", label: "Loan term (years)", group: "Application", type: "num", mandatory: true },
+  { key: "repayment_basis", label: "Repayment basis", group: "Application", hint: "Interest only or Amortising" },
+  { key: "interest_rate_pct", label: "Proposed pay rate (%)", group: "Application", type: "num" },
+  { key: "owned_by_borrower", label: "Property already owned by borrower", group: "Application", mandatory: true, hint: "Yes or No" },
+  { key: "purchase_price", label: "Purchase price", group: "Application", type: "money", mandatoryIf: "purchase" },
+  { key: "existing_debt", label: "Existing debt to repay", group: "Application", type: "money", hint: "amount owed to the current lender, from a redemption statement, accounts or the broker" },
+  { key: "borrower_name", label: "Borrower", group: "Borrower", mandatory: true },
+  { key: "company_number", label: "Company number", group: "Borrower" },
+  { key: "registered_address", label: "Registered address", group: "Borrower" },
+  { key: "directors", label: "Directors and guarantors", group: "Borrower" },
+  { key: "experience", label: "Property investment experience", group: "Borrower" },
+  { key: "adverse_credit", label: "Adverse credit", group: "Borrower" },
+  { key: "accounts_year_end", label: "Latest accounts year end", group: "Borrower", type: "date" },
+  { key: "property_address", label: "Property address", group: "Property", mandatory: true },
+  { key: "property_country", label: "Country", group: "Property", hint: "England, Wales, Scotland, Northern Ireland or Outside UK" },
+  { key: "property_type", label: "Property type", group: "Property" },
+  { key: "tenure", label: "Tenure", group: "Property" },
+  { key: "property_value", label: "Property value", group: "Property", type: "money", mandatory: true },
+  { key: "value_basis", label: "Value basis", group: "Property", hint: "Valuation or Broker estimate" },
+  { key: "valuation_date", label: "Valuation date", group: "Property", type: "date" },
+  { key: "valuer", label: "Valuer", group: "Property" },
+  { key: "epc_rating", label: "EPC rating", group: "Property" },
+  { key: "floor_area_sqft", label: "Floor area (sq ft)", group: "Property", type: "num", hint: "total net or gross area in square feet" },
+  { key: "market_rent", label: "Market rent (ERV)", group: "Income", type: "money", hint: "valuer's estimated rental value per year" },
+  { key: "valuation_yield_pct", label: "Valuation yield (%)", group: "Income", type: "num", hint: "net initial or equivalent yield stated by the valuer, number e.g. 7.6" },
+  { key: "annual_rent", label: "Annual passing rent", group: "Income", type: "money", mandatory: true },
+];
+const FIELD = Object.fromEntries(FIELDS.map((f) => [f.key, f]));
+const NUMERIC = new Set(["loan_amount", "loan_term_years", "interest_rate_pct", "purchase_price", "property_value", "annual_rent", "existing_debt", "floor_area_sqft", "market_rent", "valuation_yield_pct"]);
+/* BR-03: the value used comes from the strongest source */
+const PRIORITY = {
+  property_value: ["Valuation report"],
+  valuation_date: ["Valuation report"],
+  annual_rent: ["Tenancy schedule", "Lease", "Valuation report"],
+  loan_amount: ["Application form", "Broker email"],
+  loan_term_years: ["Application form", "Broker email"],
+  interest_rate_pct: ["Application form", "Broker email"],
+  purchase_price: ["Application form", "Broker email", "Sales particulars"],
+  company_number: ["Companies House", "Accounts", "Application form"],
+  borrower_name: ["Companies House", "Application form", "Accounts"],
+  epc_rating: ["EPC certificate", "Valuation report"],
+  market_rent: ["Valuation report"],
+  valuation_yield_pct: ["Valuation report"],
+  floor_area_sqft: ["Valuation report", "Tenancy schedule"],
+  existing_debt: ["Redemption statement", "Application form", "Broker email"],
+};
+const STATES = ["Found", "Not present", "Not confident", "Not applicable"];
+const stateClass = (s) => ({ "Found": "s-found", "Not present": "s-notpresent", "Not confident": "s-notconfident", "Not applicable": "s-na" }[s] || "s-na");
+
+/* ------------------------------------------------------------------ settings and AI providers */
+const PROVIDERS = {
+  "claude-builtin": { name: "Claude (built in)", desc: "Uses your Claude account through this page. No key needed. Works inside the NashFlow link." },
+  "gemini": { name: "Google Gemini", desc: "Free key from aistudio.google.com. Works in the downloaded copy. On the free tier Google may use what you send to improve its models." },
+  "claude-api": { name: "Claude API", desc: "Anthropic API key. Works in the downloaded copy." },
+  "azure": { name: "Azure OpenAI", desc: "Your Azure OpenAI resource, for example NashTech's own. Works in the downloaded copy." },
+};
+let settings = Object.assign({ provider: "auto", geminiKey: "", geminiModel: "gemini-2.5-flash", claudeKey: "", claudeModel: "claude-sonnet-5-5", azureEndpoint: "", azureDeployment: "", azureKey: "", azureVersion: "2024-10-21" }, load("nashflow.settings", {}));
+let sampleFn = null;
+let sampleChecked = false;
+(async () => {
+  try { if (window.claude && typeof window.claude.use === "function") sampleFn = await window.claude.use("sample"); } catch (e) { sampleFn = null; }
+  sampleChecked = true; renderProviderPill();
+})();
+setTimeout(() => { if (!sampleChecked) { sampleChecked = true; renderProviderPill(); } }, 11000);
+if (!(window.claude && window.claude.use)) { sampleChecked = true; }
+
+function activeProvider() {
+  if (settings.provider && settings.provider !== "auto") return settings.provider;
+  return sampleFn ? "claude-builtin" : "gemini";
+}
+function renderProviderPill() {
+  const p = activeProvider();
+  let label = PROVIDERS[p].name;
+  if (p === "gemini") label += settings.geminiKey ? "" : " (add key in Settings)";
+  if (p === "claude-builtin" && !sampleFn && sampleChecked) label += " (not available here)";
+  $("#providerPill").textContent = label;
+}
+
+async function askAI(prompt, images, purpose) {
+  if (window.__testAI) return window.__testAI(prompt, images, purpose);
+  const p = activeProvider();
+  if (p === "claude-builtin") {
+    if (!sampleFn) throw new Error("Claude (built in) only works inside the NashFlow link on claude.ai. Open Settings to choose another provider.");
+    const opts = { modelTier: purpose === "memo" ? "complex" : "default", cache: false };
+    const lim0 = await sampleFn.limits().catch(() => null);
+    if (lim0 && Array.isArray(lim0.modelTiers) && !lim0.modelTiers.includes(opts.modelTier)) opts.modelTier = "default";
+    if (images.length) {
+      const lim = await sampleFn.limits().catch(() => null);
+      if (lim && lim.images) opts.images = images.slice(0, lim.images.maxCount || 10).map((im) => new Blob([b64ToBytes(im.b64)], { type: im.mime }));
+    }
+    try { return await sampleFn.json(prompt, opts); }
+    catch (e0) {
+      let e = e0;
+      if (opts.modelTier !== "default" && !["not_granted", "rate_limited", "cancelled", "prompt_too_large"].includes(e0 && e0.code)) {
+        try { return await sampleFn.json(prompt, Object.assign({}, opts, { modelTier: "default" })); } catch (e1) { e = e1; }
+      }
+      const why = { not_granted: "Claude was not allowed for this page. Reload and choose Allow when asked.", rate_limited: "Too many requests just now. Wait a minute and run again.", prompt_too_large: "The deal pack is too large. Remove a document and try again.", invalid_json: "The reply could not be read as data. Run the agents again." }[e && e.code];
+      throw new Error(why || (e && e.message) || "Claude did not answer.");
+    }
+  }
+  if (p === "gemini") {
+    if (!settings.geminiKey) throw new Error("Add your Gemini key in Settings first (free from aistudio.google.com).");
+    const parts = [{ text: prompt }].concat(images.map((im) => ({ inline_data: { mime_type: im.mime, data: im.b64 } })));
+    const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(settings.geminiModel)}:generateContent`, {
+      method: "POST", headers: { "Content-Type": "application/json", "x-goog-api-key": settings.geminiKey },
+      body: JSON.stringify({ contents: [{ role: "user", parts }], generationConfig: { temperature: 0.1, responseMimeType: "application/json" } }),
+    }).catch(() => { throw new Error("Could not reach Google. Gemini works in the downloaded copy of this page, not inside the NashFlow link."); });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error(res.status === 429 ? "Gemini free tier limit reached. Wait a minute and run again." : "Gemini said: " + ((data.error && data.error.message) || res.status));
+    const text = (data.candidates?.[0]?.content?.parts || []).map((x) => x.text || "").join("");
+    return parseJSONLoose(text);
+  }
+  if (p === "claude-api") {
+    if (!settings.claudeKey) throw new Error("Add your Claude API key in Settings first.");
+    const content = images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.mime, data: im.b64 } })).concat([{ type: "text", text: prompt }]);
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "content-type": "application/json", "x-api-key": settings.claudeKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+      body: JSON.stringify({ model: settings.claudeModel, max_tokens: 16000, messages: [{ role: "user", content }] }),
+    }).catch(() => { throw new Error("Could not reach the Claude API. It works in the downloaded copy of this page, not inside the NashFlow link."); });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error("Claude API said: " + ((data.error && data.error.message) || res.status));
+    return parseJSONLoose((data.content || []).map((x) => x.text || "").join(""));
+  }
+  if (p === "azure") {
+    if (!settings.azureEndpoint || !settings.azureDeployment || !settings.azureKey) throw new Error("Add the Azure endpoint, deployment and key in Settings first.");
+    const content = [{ type: "text", text: prompt }].concat(images.map((im) => ({ type: "image_url", image_url: { url: `data:${im.mime};base64,${im.b64}` } })));
+    const url = `${settings.azureEndpoint.replace(/\/$/, "")}/openai/deployments/${encodeURIComponent(settings.azureDeployment)}/chat/completions?api-version=${encodeURIComponent(settings.azureVersion)}`;
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json", "api-key": settings.azureKey },
+      body: JSON.stringify({ messages: [{ role: "user", content }], temperature: 0.1, response_format: { type: "json_object" } }) })
+      .catch(() => { throw new Error("Could not reach Azure. It works in the downloaded copy of this page, not inside the NashFlow link."); });
+    const data = await res.json().catch(() => ({}));
+    if (!res.ok) throw new Error("Azure said: " + ((data.error && data.error.message) || res.status));
+    return parseJSONLoose(data.choices?.[0]?.message?.content || "");
+  }
+  throw new Error("No AI provider chosen.");
+}
+
+/* ------------------------------------------------------------------ document intake */
+const loaded = {};
+function loadScript(src) {
+  if (loaded[src]) return loaded[src];
+  loaded[src] = new Promise((res, rej) => { const s = document.createElement("script"); s.src = src; s.onload = res; s.onerror = () => rej(new Error("Could not load a reader for this file type.")); document.head.append(s); });
+  return loaded[src];
+}
+async function readFile(file) {
+  const name = file.name; const lower = name.toLowerCase();
+  const doc = { name, pages: [], images: [] };
+  if (lower.endsWith(".pdf") || file.type === "application/pdf") {
+    const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
+    for (let i = 1; i <= pdf.numPages; i++) {
+      const page = await pdf.getPage(i);
+      const tc = await page.getTextContent();
+      let text = tc.items.map((it) => it.str + (it.hasEOL ? "\n" : " ")).join("").replace(/[ \t]+/g, " ").replace(/ \n/g, "\n").trim();
+      doc.pages.push(text);
+      if (text.replace(/\s/g, "").length < 25) {
+        const vp = page.getViewport({ scale: 1.6 });
+        const canvas = document.createElement("canvas"); canvas.width = vp.width; canvas.height = vp.height;
+        await page.render({ canvasContext: canvas.getContext("2d"), viewport: vp }).promise;
+        doc.images.push({ page: i, mime: "image/jpeg", b64: canvas.toDataURL("image/jpeg", 0.85).split(",")[1] });
+        doc.pages[i - 1] = "[Scanned page with no text layer. Read from the image.]";
+      }
+    }
+  } else if (lower.endsWith(".docx")) {
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js");
+    const r = await window.mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+    doc.pages.push(r.value.trim());
+  } else if (/\.(xlsx|xls)$/.test(lower)) {
+    await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+    const wb = window.XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
+    wb.SheetNames.forEach((sn) => doc.pages.push("Sheet: " + sn + "\n" + window.XLSX.utils.sheet_to_csv(wb.Sheets[sn])));
+  } else if (/\.(png|jpe?g|webp)$/.test(lower) || (file.type || "").startsWith("image/")) {
+    const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1]); fr.readAsDataURL(file); });
+    doc.images.push({ page: 1, mime: file.type || "image/jpeg", b64 });
+    doc.pages.push("[Image. Read from the image.]");
+  } else {
+    doc.pages.push((await file.text()).trim());
+  }
+  return doc;
+}
+
+/* ------------------------------------------------------------------ state */
+let cases = load("nashflow.cases.v1", []);
+const memImages = {}; // case id -> images (not saved to browser storage)
+let currentId = load("nashflow.current", null);
+let currentTab = "memo";
+function nextRef() { const n = cases.reduce((m, c) => Math.max(m, parseInt(String(c.ref || "CF-2000").slice(3)) || 2000), 2000) + 1; return "CF-" + n; }
+function save() {
+  if (!store("nashflow.cases.v1", cases)) toast("This browser could not save the cases. They will be lost on reload.");
+  store("nashflow.current", currentId);
+}
+const cur = () => cases.find((c) => c.id === currentId);
+function audit(c, who, what, kind = "human") { c.audit.push({ at: nowISO(), who, what, kind }); }
+
+async function newCaseFromFiles(files, title) {
+  const c = { id: uid(), ref: nextRef(), createdAt: nowISO(), title: title || "New case", status: "New (being read by agents)", docs: [], audit: [], run: null, fields: null, tenants: [], checks: [], consistency: [], judgements: [], memo: null, rec: null, decision: null };
+  cases.unshift(c); currentId = c.id; currentTab = "memo"; view = "case"; srcDocSel = null; selectedField = "__auto";
+  memImages[c.id] = [];
+  render();
+  let i = 0;
+  for (const f of files) {
+    i++;
+    try {
+      const d = await readFile(f);
+      d.id = "D" + i;
+      d.images.forEach((im) => memImages[c.id].push(Object.assign({ doc: d.id }, im)));
+      d.imagePages = d.images.map((im) => im.page);
+      delete d.images;
+      c.docs.push(d);
+      audit(c, "Intake agent", `Read ${d.id} "${d.name}" (${d.pages.length} page${d.pages.length > 1 ? "s" : ""})`, "agent");
+    } catch (e) {
+      audit(c, "Intake agent", `Could not read "${f.name}": ${e.message}`, "agent");
+    }
+  }
+  save(); render();
+  runAgents(c);
+}
+
+/* ------------------------------------------------------------------ prompts */
+function docsBlock(c) {
+  return c.docs.map((d) => `=== DOCUMENT ${d.id}: "${d.name}" ===\n` + d.pages.map((p, i) => `--- ${d.id} page ${i + 1} ---\n${p}`).join("\n")).join("\n\n");
+}
+function extractPrompt(c, imgs) {
+  const fieldList = FIELDS.map((f) => `- ${f.key}: ${f.label}${f.hint ? " (" + f.hint + ")" : ""}${f.type === "money" ? " (number in pounds, no symbols)" : ""}${f.type === "date" ? " (YYYY-MM-DD)" : ""}${f.key === "interest_rate_pct" ? " (number, e.g. 7.25)" : ""}`).join("\n");
+  const imgNote = imgs.length ? "\nImages attached, in order: " + imgs.map((im, i) => `image ${i + 1} = ${im.doc} page ${im.page}`).join("; ") + ".\n" : "";
+  return `You are the extraction agent in NashFlow, a commercial property lending tool used by a UK specialist lender. Read the broker's deal pack below and extract the application fields with their sources. Today is ${new Date().toISOString().slice(0, 10)}.
+
+Rules:
+- Use only what the documents say. Never guess or fill in a value that is not there.
+- Every field gets one state: "Found" (found with good confidence), "Not present" (expected but not in any document), "Not confident" (found but a person should check it, for example vague, approximate, conflicting wording or hard to read), "Not applicable" (does not apply, for example purchase_price on a refinance, or valuation_date when there is no valuation).
+- For Found and Not confident, give the source: document id, page number, and a short exact quote (copy 3 to 12 words exactly as written in the document so it can be highlighted).
+- If the same field appears in more than one document, put the other occurrences in "others", even when they agree. This is used to check consistency. Include the broker email's figures as well as the formal documents' figures.
+- annual_rent is the current passing rent actually payable, not estimated rental value of vacant space.
+- property_country is inferred from the address and postcode.
+- A broker's rough figure ("around", "about", "we think") is Not confident unless a formal document confirms it. value_basis is "Broker estimate" when there is no valuation report.
+- Classify each document as one of: Broker email, Application form, Valuation report, Tenancy schedule, Lease, Accounts, Sales particulars, Companies House, EPC certificate, Redemption statement, Sponsor statement, Other. Give its date if shown.
+- List every tenant from a tenancy schedule or lease with annual rent (number), lease_end and break_date (YYYY-MM-DD, or null with a note if not clear). Exclude vacant units.
+${imgNote}
+Fields:
+${fieldList}
+
+Reply with only this JSON:
+{
+ "documents": [{"id": "D1", "type": "Broker email", "date": "YYYY-MM-DD or null", "summary": "one line"}],
+ "fields": {
+   "<field key>": {"state": "Found", "value": "...", "source": {"doc": "D1", "page": 1, "quote": "exact words"}, "note": "short reason if not Found", "others": [{"value": "...", "doc": "D2", "page": 1, "quote": "exact words"}]}
+ },
+ "tenants": [{"name": "...", "annual_rent": 0, "lease_end": "YYYY-MM-DD or null", "break_date": "YYYY-MM-DD or null", "note": "", "source": {"doc": "D3", "page": 1, "quote": "exact words"}}]
+}
+Include every field key listed above in "fields".
+
+DEAL PACK
+${docsBlock(c)}`;
+}
+function memoPrompt(c) {
+  const fieldsOut = {};
+  FIELDS.forEach((f) => { const x = c.fields[f.key]; fieldsOut[f.key] = { state: x.state, value: x.value, source: x.source ? `[${x.source.doc} p${x.source.page}]` : null }; });
+  const checks = c.checks.map((k) => ({ area: k.area, rule: k.rule, result: k.value, outcome: k.outcome, flag: k.flag, why: k.why }));
+  const sens = (c.analysis || []).map((a) => ({ measure: a.label, value: a.value, comment: a.note }));
+  return `You are the memo agent in NashFlow, a commercial property lending tool for a UK specialist lender. Write as an experienced UK commercial real estate credit analyst preparing a credit paper for an Underwriter or Credit Committee. The agents assist; a person decides.
+
+How to write:
+- The reader is a credit professional. Be analytical, not descriptive: after each fact, say what it means for the credit (security, income, cover, sponsor, exit). No padding, no marketing language.
+- Plain UK English. Do not use em dashes. Use market terms correctly: passing rent, ERV, reversion, WAULT to expiry and to break, net initial yield, capital value per sq ft, debt yield, ICR, DSCR, LTV, FRI lease, MEES, first legal charge, personal guarantee, conditions precedent and subsequent.
+- Use only facts in the deal pack and the calculated figures. Never invent tenant covenants, credit scores, market evidence, comparables or rates. Where the pack is silent, say so and say what the underwriter should obtain.
+- Cite every figure taken from a document straight after it as [D2 p1], one source per bracket. Mark figures from CALCULATED CHECKS or SENSITIVITIES as (calculated). Do not recalculate or contradict calculated figures.
+- Within a section you may use short paragraphs, "**Label**" lines and "- " bullet lines. Put a blank line between paragraphs and lists.
+
+Tasks:
+1. Assess these judgement areas against the policy, each with outcome "Pass", "Fail" or "Unclear", the evidence and a one-sentence explanation. Use "Unclear" when the pack does not give enough to judge.
+${JUDGEMENT_AREAS.map((j) => `   - ${j.area}: ${j.rule}`).join("\n")}
+2. Draft these credit memo sections:
+   - summary (150 to 220 words): the deal in one sentence; the three or four points that drive the credit; the main risk and its mitigant; the suggested recommendation (${c.rec ? c.rec.label : "see checks"}) and that ${c.rec ? c.rec.approver : "the approver"} decides.
+   - proposal: facility, purpose and use of funds (amount repaid to the existing lender, any equity release, fees if given), term, repayment basis, pay rate, security and guarantees, LTV, ICR, DSCR if amortising, debt yield. A short paragraph, then a "- " list of key terms.
+   - borrower: legal entity and incorporation, ownership and persons with significant control, directors and guarantors, track record and portfolio, financial strength from the accounts (rental income trend, profit, net assets, gearing, cash), Companies House points (status, charges, filings). Judge guarantor strength only from evidence.
+   - property: location and micro-location, type and specification, age and condition, tenure, EPC and MEES implications, alternative uses, and how liquid the asset is as security.
+   - valuation: valuer, date and basis, market value, capital value per sq ft, passing rent against ERV and the reversion, yield (the valuer's if given, otherwise the calculated implied yield), comparables if given and whether the value looks supported, the valuer's view on suitability, and reliance points (age of the valuation, who instructed it, need for a lender-instructed RICS valuation).
+   - income: one "- " line per tenant (tenant, rent and share of total, lease end and break, covenant comment from evidence only), then WAULT to expiry and to break, rent at risk from lease events within the loan term, concentration, vacancy, arrears and reversion potential.
+   - financial_analysis: LTV, ICR at the pay rate and under stress, DSCR if amortising, debt yield and the sensitivities, with headroom against policy, and what the accounts show. One or two paragraphs, then "- " lines for each red or amber flag with the reason.
+   - exit: how the loan is repaid at maturity (refinance or sale), whether the asset should be refinanceable then given lease events before maturity and the LTV and ICR at maturity, and what could stop it.
+   - risks: 5 to 8 "- Risk: ... Mitigant: ..." lines, most important first, specific to this deal.
+   - covenants: proposed financial covenants using the SENSITIVITIES (LTV and ICR levels with headroom), then information undertakings (annual accounts, quarterly rent roll, lender's right to revalue). Say the levels are proposed.
+   - conditions: a "**Conditions precedent**" list and a "**Conditions subsequent**" list, specific to this deal (for example lender-instructed RICS valuation, report on title, redemption statement, KYC and AML on directors and PSCs, personal guarantees with independent legal advice, buildings insurance with the lender noted, a new lease for a tenant holding over).
+3. broker_request: if anything is Not present, Not confident, out of date or inconsistent, draft one short polite email to the broker (first name) listing each item needed as "- " lines, signed "[Your name]". Otherwise "".
+
+Reply with only this JSON:
+{"judgements": [{"area": "Property type", "outcome": "Pass", "evidence": "short", "explanation": "one sentence", "source": {"doc": "D2", "page": 1}}],
+ "memo": {"summary": "", "proposal": "", "borrower": "", "property": "", "valuation": "", "income": "", "financial_analysis": "", "exit": "", "risks": "", "covenants": "", "conditions": ""},
+ "broker_request": ""}
+
+EXTRACTED FIELDS
+${JSON.stringify(fieldsOut, null, 1)}
+
+TENANTS
+${JSON.stringify(c.tenants.map((t) => ({ name: t.name, annual_rent: t.annual_rent, lease_end: t.lease_end, break_date: t.break_date, note: t.note })), null, 1)}
+
+CALCULATED CHECKS
+${JSON.stringify(checks, null, 1)}
+
+SENSITIVITIES (calculated)
+${JSON.stringify(sens, null, 1)}
+
+CONSISTENCY FLAGS
+${JSON.stringify(c.consistency.map((f) => f.text))}
+
+DEAL PACK
+${docsBlock(c)}`;
+}
+
+/* ------------------------------------------------------------------ normalise extraction */
+function normaliseExtraction(c, r) {
+  const docType = {};
+  (r.documents || []).forEach((d) => { docType[d.id] = d.type; const doc = c.docs.find((x) => x.id === d.id); if (doc) { doc.type = d.type; doc.date = d.date; doc.summary = d.summary; } });
+  const fields = {};
+  c.consistency = [];
+  FIELDS.forEach((f) => {
+    const raw = (r.fields || {})[f.key] || {};
+    let state = STATES.includes(raw.state) ? raw.state : (raw.value != null && raw.value !== "" ? "Found" : "Not present");
+    const cands = [];
+    if (raw.value != null && raw.value !== "" && state !== "Not present" && state !== "Not applicable") cands.push({ value: raw.value, doc: raw.source?.doc, page: raw.source?.page, quote: raw.source?.quote });
+    (raw.others || []).forEach((o) => { if (o && o.value != null && o.value !== "") cands.push({ value: o.value, doc: o.doc, page: o.page, quote: o.quote }); });
+    cands.forEach((k) => { k.docType = docType[k.doc] || ""; if (NUMERIC.has(f.key)) k.num = parseNum(k.value); });
+    let used = cands[0] || null;
+    const pr = PRIORITY[f.key];
+    if (pr && cands.length > 1) {
+      for (const t of pr) { const hit = cands.find((k) => k.docType === t); if (hit) { used = hit; break; } }
+    }
+    if (used && state === "Not present") state = "Found";
+    const field = { key: f.key, state, value: used ? (NUMERIC.has(f.key) ? used.num : used.value) : null, source: used && used.doc ? { doc: used.doc, page: used.page || 1, quote: used.quote || "" } : null, note: raw.note || "", candidates: cands };
+    if (NUMERIC.has(f.key) && used && used.num != null) {
+      const tol = f.type === "money" ? 0.01 : 0;
+      const diff = cands.filter((k) => k.num != null && Math.abs(k.num - used.num) > Math.abs(used.num) * tol + 1e-9);
+      if (diff.length) {
+        const fmt = (v) => (f.type === "money" ? money(v) : String(v));
+        c.consistency.push({ key: f.key, text: `${f.label}: ${[used].concat(diff).map((k) => `${fmt(k.num)} in ${k.docType || k.doc}`).join(" vs ")}. Using ${fmt(used.num)} from the ${used.docType || used.doc} (strongest source).`, cands: [used].concat(diff) });
+      }
+    }
+    fields[f.key] = field;
+  });
+  c.fields = fields;
+  c.tenants = (r.tenants || []).map((t) => ({ name: t.name, annual_rent: parseNum(t.annual_rent), lease_end: t.lease_end || null, break_date: t.break_date || null, note: t.note || "", source: t.source || null }));
+  applyNA(c);
+}
+function applyNA(c) {
+  const F = c.fields;
+  const owned = String(F.owned_by_borrower.value || "").toLowerCase();
+  const purpose = String(F.purpose.value || "").toLowerCase();
+  if ((owned.startsWith("y") || /refin|capital/.test(purpose)) && F.purchase_price.state !== "Found") { F.purchase_price.state = "Not applicable"; F.purchase_price.note = "Refinance, so no purchase price."; }
+  if (/estimate/i.test(String(F.value_basis.value || "")) && F.valuation_date.state !== "Found") { F.valuation_date.state = "Not applicable"; F.valuation_date.note = "No valuation yet; value is the broker's estimate."; }
+  if (/estimate/i.test(String(F.value_basis.value || "")) && F.valuer.state !== "Found") { F.valuer.state = "Not applicable"; F.valuer.note = "No valuation yet."; }
+}
+const usable = (c, k) => { const f = c.fields[k]; return f && (f.state === "Found" || f.state === "Not confident" || f.edited) && f.value != null && f.value !== "" ? f.value : null; };
+const num = (c, k) => { const v = usable(c, k); return v == null ? null : parseNum(v); };
+
+/* ------------------------------------------------------------------ calculated checks (BR-05: numeric limits are calculated, not judged by the AI) */
+function computeChecks(c) {
+  const P = POLICY; const checks = [];
+  const L = num(c, "loan_amount"), V = num(c, "property_value"), R = num(c, "annual_rent"), T = num(c, "loan_term_years"), rate = num(c, "interest_rate_pct");
+  const amort = /amort|capital|repay/i.test(String(usable(c, "repayment_basis") || "")) && !/interest only/i.test(String(usable(c, "repayment_basis") || ""));
+  const add = (o) => checks.push(Object.assign({ type: "Calculated", flag: null }, o));
+  const missing = (names) => `Cannot calculate: ${names} not available.`;
+
+  // Loan size
+  if (L == null) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: "-", outcome: "Unclear", why: missing("loan amount") });
+  else if (L > P.maxLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Above the £10m cap, so outside appetite.` });
+  else if (L < P.minLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Below the £250,000 minimum.` });
+  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: `Within the lending range.${L > P.uwLimit ? " Over £1m, so a Credit Committee decision." : ""}` });
+
+  // Term
+  const maxT = amort ? P.maxTermAmort : P.maxTermIO;
+  if (T == null) add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: "3 to 15 years (up to 25 if capital repayment)", value: "-", outcome: "Unclear", why: missing("loan term") });
+  else add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: "3 to 15 years (up to 25 if capital repayment)", value: T + " years", outcome: T >= P.minTerm && T <= maxT ? "Pass" : "Fail", flag: T >= P.minTerm && T <= maxT ? null : "red", why: T >= P.minTerm && T <= maxT ? `Within ${P.minTerm} to ${maxT} years.` : `Outside ${P.minTerm} to ${maxT} years.` });
+
+  // LTV
+  const single = c.tenants.length === 1;
+  const ltvMax = single ? P.maxLTVSingle : P.maxLTV;
+  if (L == null || V == null) add({ id: "ltv", area: "Loan to value", clause: "7.1 LTV", rule: `Up to ${P.maxLTV}% (${P.maxLTVSingle}% single-let or specialist)`, value: "-", outcome: "Unclear", why: missing([L == null ? "loan amount" : null, V == null ? "property value" : null].filter(Boolean).join(" and ")) });
+  else {
+    const ltv = (L / V) * 100; const pass = ltv <= ltvMax + 1e-9; const near = pass && ltv > ltvMax * 0.9;
+    const basis = /estimate/i.test(String(usable(c, "value_basis") || "")) ? " Value is the broker's estimate, so this needs a valuation." : "";
+    add({ id: "ltv", area: "Loan to value", clause: "7.1 LTV", rule: `Up to ${ltvMax}%${single ? " (single-let)" : ""}`, value: pct(ltv), metric: ltv, outcome: pass ? "Pass" : "Fail", flag: pass ? (near || basis ? "amber" : null) : "red",
+      why: `${money(L)} / ${money(V)} = ${pct(ltv)} against a ${ltvMax}% limit${pass ? (near ? ", within 10% of the limit." : ".") : `, ${(ltv - ltvMax).toFixed(1)} points over.`}${basis}` });
+  }
+
+  // ICR
+  const rUsed = Math.max(rate || 0, P.stressRate);
+  if (L == null || R == null) add({ id: "icr", area: "Interest cover (ICR)", clause: "7.1 ICR", rule: `At least ${P.minICR}x at the higher of pay rate or ${P.stressRate}% stress`, value: "-", outcome: "Unclear", why: missing([L == null ? "loan amount" : null, R == null ? "rental income" : null].filter(Boolean).join(" and ")) });
+  else {
+    const interest = (L * rUsed) / 100; const icr = R / interest; const pass = icr >= P.minICR; const near = pass && icr < P.minICR * 1.1;
+    add({ id: "icr", area: "Interest cover (ICR)", clause: "7.1 ICR", rule: `At least ${P.minICR}x`, value: times(icr), metric: icr, outcome: pass ? "Pass" : "Fail", flag: pass ? (near ? "amber" : null) : "red",
+      why: `Rent ${money(R)} / interest ${money(interest)} (${money(L)} at ${rUsed}%${rate == null ? ", stress rate as no pay rate given" : rate < P.stressRate ? ", stress rate" : ", pay rate"}) = ${times(icr)}.${near ? " Within 10% of the limit." : ""}` });
+  }
+
+  // DSCR
+  if (!amort) add({ id: "dscr", area: "Debt service cover (DSCR)", clause: "7.1 DSCR", rule: `At least ${P.minDSCR}x where the loan amortises`, value: "Not applicable", outcome: "N/A", why: "Interest only, so ICR applies." });
+  else if (L == null || R == null || T == null) add({ id: "dscr", area: "Debt service cover (DSCR)", clause: "7.1 DSCR", rule: `At least ${P.minDSCR}x`, value: "-", outcome: "Unclear", why: missing("loan, rent or term") });
+  else {
+    const m = rUsed / 100 / 12, n = T * 12; const annual = ((L * m) / (1 - Math.pow(1 + m, -n))) * 12; const d = R / annual; const pass = d >= P.minDSCR;
+    add({ id: "dscr", area: "Debt service cover (DSCR)", clause: "7.1 DSCR", rule: `At least ${P.minDSCR}x`, value: times(d), metric: d, outcome: pass ? "Pass" : "Fail", flag: pass ? (d < P.minDSCR * 1.1 ? "amber" : null) : "red", why: `Rent ${money(R)} / annual repayments ${money(annual)} = ${times(d)}.` });
+  }
+
+  // Location
+  const ctry = String(usable(c, "property_country") || "");
+  if (!ctry) add({ id: "loc", area: "Location", clause: "7.1 Location", rule: "England, Wales, Scotland or Northern Ireland", value: "-", outcome: "Unclear", why: missing("country") });
+  else { const uk = /england|wales|scotland|northern ireland|united kingdom|uk/i.test(ctry) && !/outside/i.test(ctry);
+    add({ id: "loc", area: "Location", clause: "7.1 Location", rule: "England, Wales, Scotland or Northern Ireland", value: ctry, outcome: uk ? "Pass" : "Fail", flag: uk ? null : "red", core: !uk, why: uk ? "In the UK." : "Outside the UK, so outside appetite." }); }
+
+  // EPC
+  const epc = String(usable(c, "epc_rating") || "").toUpperCase().match(/\b([A-G])\b/);
+  if (!epc) add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: "E or better", value: "-", outcome: "Unclear", why: "No EPC rating in the pack." });
+  else { const ok = "ABCDE".includes(epc[1]); add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: "E or better", value: epc[1], outcome: ok ? "Pass" : "Fail", flag: ok ? (epc[1] === "E" ? "amber" : null) : "red", why: ok ? `EPC ${epc[1]} meets minimum energy standards.` : `EPC ${epc[1]} is below E, so the property cannot lawfully be let without works.` }); }
+
+  // WAULT and concentration
+  const today = new Date();
+  const withRent = c.tenants.filter((t) => t.annual_rent > 0);
+  const dated = withRent.filter((t) => parseDate(t.lease_end));
+  if (!withRent.length) add({ id: "wault", area: "Unexpired lease term (WAULT)", clause: "7.1 Income quality", rule: `At least ${P.minWAULT} years`, value: "-", outcome: "Unclear", why: "No tenancy schedule or leases, so WAULT cannot be calculated." });
+  else if (!dated.length) add({ id: "wault", area: "Unexpired lease term (WAULT)", clause: "7.1 Income quality", rule: `At least ${P.minWAULT} years`, value: "-", outcome: "Unclear", why: "No lease end dates given." });
+  else {
+    const tot = dated.reduce((s, t) => s + t.annual_rent, 0);
+    const w = dated.reduce((s, t) => s + t.annual_rent * Math.max(0, (parseDate(t.lease_end) - today) / (365.25 * 864e5)), 0) / tot;
+    const excl = withRent.length - dated.length; const pass = w >= P.minWAULT;
+    add({ id: "wault", area: "Unexpired lease term (WAULT)", clause: "7.1 Income quality", rule: `At least ${P.minWAULT} years to expiry`, value: w.toFixed(1) + " years", metric: w, outcome: pass ? "Pass" : "Fail", flag: !pass ? "red" : excl || w < P.minWAULT * 1.1 ? "amber" : null,
+      why: `Rent-weighted to lease expiry across ${dated.length} tenant${dated.length > 1 ? "s" : ""}.${excl ? ` ${excl} tenant${excl > 1 ? "s have" : " has"} no lease end date and ${excl > 1 ? "are" : "is"} left out.` : ""}` });
+  }
+  if (withRent.length) {
+    const tot = withRent.reduce((s, t) => s + t.annual_rent, 0); const top = withRent.slice().sort((a, b) => b.annual_rent - a.annual_rent)[0]; const share = (top.annual_rent / tot) * 100;
+    add({ id: "conc", area: "Tenant concentration", clause: "7.1 Income quality", rule: `Flag where one tenant pays over ${P.concentration}% of rent`, value: pct(share, 0) + " largest", outcome: "Pass", flag: share > P.concentration ? "amber" : null, why: `${top.name} pays ${pct(share, 0)} of the rent.${share > P.concentration ? " Concentration risk." : ""}` });
+    const R2 = num(c, "annual_rent");
+    if (R2 != null && Math.abs(tot - R2) > R2 * 0.01 && !c.consistency.some((x) => x.key === "tenants_sum")) c.consistency.push({ key: "tenants_sum", text: `Tenant rents add up to ${money(tot)}, but the rent used is ${money(R2)}.` });
+  }
+
+  // Accounts age (BS-06)
+  const ye = parseDate(usable(c, "accounts_year_end"));
+  if (!ye) add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age (accounts within 12 months)", rule: "Year end within the last 12 months", value: "-", outcome: "Unclear", why: "No accounts year end found." });
+  else { const months = (today - ye) / (30.44 * 864e5); const ok = months <= P.accountsMonths;
+    add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age (accounts within 12 months)", rule: "Year end within the last 12 months", value: ye.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }), outcome: ok ? "Pass" : "Fail", flag: ok ? null : "red", outOfDate: !ok, why: ok ? `${Math.floor(months)} months old.` : `${Math.floor(months)} months old, so out of date. Ask for newer accounts.` }); }
+
+  c.checks = checks;
+}
+
+/* ------------------------------------------------------------------ sensitivities and covenant headroom (calculated) */
+const COVENANTS = { ltv: 75, icr: 1.35 }; // illustrative proposed covenant levels, not from a lender
+function computeAnalysis(c) {
+  const out = []; const add = (label, value, note) => out.push({ label, value, note });
+  const L = num(c, "loan_amount"), V = num(c, "property_value"), R = num(c, "annual_rent"), rate = num(c, "interest_rate_pct"), T = num(c, "loan_term_years");
+  const area = num(c, "floor_area_sqft"), erv = num(c, "market_rent"), vy = num(c, "valuation_yield_pct"), debt = num(c, "existing_debt");
+  const rUsed = Math.max(rate || 0, POLICY.stressRate); const interest = L != null ? (L * rUsed) / 100 : null;
+  if (L != null && debt != null) add("Use of funds", `${money(debt)} to existing lender`, L >= debt ? `${money(L - debt)} left for fees and equity release.` : `Loan is ${money(debt - L)} short of the existing debt, so the borrower must fund the gap.`);
+  if (L != null && R != null) add("Debt yield", pct((R / L) * 100), "Passing rent as a share of the loan. A common benchmark for secondary commercial property is 8% to 10% or more.");
+  if (V != null && R != null) add("Implied yield on value", pct((R / V) * 100, 2), vy != null ? `Valuer's stated yield is ${vy}%.` : "Passing rent divided by market value (gross).");
+  if (area) { if (V != null) add("Capital value per sq ft", "£" + Math.round(V / area), `On ${Math.round(area).toLocaleString("en-GB")} sq ft.`); if (R != null) add("Passing rent per sq ft", "£" + (R / area).toFixed(2), erv != null ? `ERV £${(erv / area).toFixed(2)} per sq ft.` : ""); }
+  if (R != null && erv != null) { const rev = ((erv - R) / R) * 100; add("Reversion", pct(rev), rev >= 0 ? `ERV ${money(erv)} is above passing rent, so rents are not over-rented.` : `Passing rent is above ERV ${money(erv)}: over-rented, so income may fall at lease events.`); }
+  if (interest != null && R != null) {
+    add("ICR if rates rise 2%", times(R / ((L * (rUsed + 2)) / 100)), `At ${(rUsed + 2).toFixed(2)}% against the ${POLICY.minICR}x policy minimum.`);
+    const withRent = c.tenants.filter((t) => t.annual_rent > 0);
+    if (withRent.length > 1) { const top = withRent.slice().sort((a, b) => b.annual_rent - a.annual_rent)[0]; add("ICR if the largest tenant leaves", times((R - top.annual_rent) / interest), `Without ${top.name} (${money(top.annual_rent)}).`); }
+    add("Break-even occupancy", pct((interest / R) * 100, 0), "Share of the passing rent needed to pay interest.");
+    add("Rent fall before ICR covenant breach", pct(Math.max(0, (1 - (COVENANTS.icr * interest) / R) * 100), 0), `Against a proposed ICR covenant of ${COVENANTS.icr}x.`);
+  }
+  if (L != null && V != null) {
+    add("LTV if value falls 10%", pct((L / (V * 0.9)) * 100), "");
+    add("LTV if value falls 20%", pct((L / (V * 0.8)) * 100), "");
+    add("Value fall before LTV covenant breach", pct(Math.max(0, (1 - L / (COVENANTS.ltv / 100) / V) * 100), 0), `Against a proposed LTV covenant of ${COVENANTS.ltv}%.`);
+  }
+  if (T != null && c.tenants.length && R) {
+    const end = new Date(); end.setFullYear(end.getFullYear() + T);
+    const atRisk = c.tenants.filter((t) => { const d = [parseDate(t.break_date), parseDate(t.lease_end)].filter(Boolean).sort((a, b) => a - b)[0]; return d && d <= end; });
+    const rr = atRisk.reduce((s, t) => s + (t.annual_rent || 0), 0);
+    add("Rent with a lease end or break within the loan term", pct((rr / R) * 100, 0), atRisk.length ? `${atRisk.length} tenant${atRisk.length > 1 ? "s" : ""}: ${atRisk.map((t) => t.name).join(", ")}.` : "No lease events before maturity.");
+  }
+  c.analysis = out;
+}
+
+/* ------------------------------------------------------------------ recommendation (BR-06) and routing (BR-07) */
+function computeRecommendation(c) {
+  const allChecks = c.checks.concat(c.judgements);
+  const reasons = [];
+  const core = c.checks.filter((k) => k.core && k.outcome === "Fail");
+  const missing = FIELDS.filter((f) => {
+    const x = c.fields[f.key]; const need = f.mandatory || (f.mandatoryIf === "purchase" && x.state !== "Not applicable");
+    return need && !x.edited && x.state !== "Found" && x.state !== "Not applicable";
+  });
+  const outOfDate = c.checks.filter((k) => k.outOfDate);
+  const unclear = c.checks.filter((k) => k.outcome === "Unclear" && !["epc"].includes(k.id));
+  const exceptions = allChecks.filter((k) => k.outcome === "Fail" && !k.core && !k.outOfDate);
+  core.forEach((k) => reasons.push({ text: `${k.area}: ${k.why}`, ref: k.id }));
+  exceptions.forEach((k) => reasons.push({ text: `${k.area} outside policy: ${k.value && k.value !== "-" ? k.value + ". " : ""}${k.why || k.explanation || ""}`, ref: k.id }));
+  missing.forEach((f) => reasons.push({ text: `${FIELD[f.key].label} is ${c.fields[f.key].state.toLowerCase()}.${c.fields[f.key].note ? " " + c.fields[f.key].note : ""}`, ref: "field:" + f.key }));
+  outOfDate.forEach((k) => reasons.push({ text: `Out of date: ${k.area.toLowerCase()} (${k.why})`, ref: k.id }));
+  unclear.forEach((k) => { if (!missing.length) reasons.push({ text: `${k.area}: ${k.why}`, ref: k.id }); });
+  c.consistency.forEach((x) => reasons.push({ text: `Inconsistent: ${x.text}`, ref: "field:" + x.key }));
+  allChecks.filter((k) => k.flag === "amber" && k.outcome === "Pass").forEach((k) => reasons.push({ text: `Watch: ${k.area}, ${k.why}`, ref: k.id }));
+  c.judgements.filter((k) => k.outcome === "Unclear").forEach((k) => reasons.push({ text: `To review: ${k.area}, ${k.explanation}`, ref: k.id }));
+
+  let kind, label;
+  if (core.length) { kind = "decline"; label = "Decline (outside appetite)"; }
+  else if (missing.length || outOfDate.length || unclear.length) { kind = "more"; label = "Request more information"; }
+  else if (exceptions.length) { kind = "escalate"; label = "Escalate (policy exception)"; }
+  else { kind = "approve"; label = "Approve (within appetite)"; }
+  const L = num(c, "loan_amount");
+  let approver;
+  if (L != null && L > POLICY.maxLoan) approver = "Outside appetite: decline";
+  else if (exceptions.length) approver = "Credit Committee (policy exception)";
+  else if (L != null && L > POLICY.uwLimit) approver = "Credit Committee (over £1m)";
+  else approver = "Underwriter (up to £1m)";
+  const complete = !missing.length; const consistent = !c.consistency.length;
+  c.rec = { kind, label, reasons, approver, complete, consistent, exceptions: exceptions.map((k) => k.area), at: nowISO() };
+}
+
+/* ------------------------------------------------------------------ memo assembly (BR-09) */
+const MEMO_SECTIONS = [
+  ["summary", "Executive summary"], ["proposal", "Proposal and structure"], ["borrower", "Borrower and sponsor"], ["property", "Property and location"],
+  ["valuation", "Valuation"], ["income", "Income and lease profile"], ["financial_analysis", "Financial analysis"], ["sensitivity", "Sensitivity analysis"],
+  ["external", "External checks"], ["policy", "Policy assessment"], ["exit", "Exit strategy"], ["risks", "Risks and mitigants"],
+  ["covenants", "Covenants"], ["conditions", "Conditions"], ["recommendation", "Recommendation"],
+];
+function systemSections(c) {
+  const pol = c.checks.concat(c.judgements).map((k) => `- ${k.area} (${k.clause}): ${k.outcome}. ${k.type === "Calculated" ? k.why : k.explanation}${k.source && k.source.doc ? ` [${k.source.doc} p${k.source.page || 1}]` : ""}`).join("\n");
+  const rec = `Suggested: ${c.rec.label}. Required approver: ${c.rec.approver}.\n\nReasons, most important first:\n\n` + (c.rec.reasons.length ? c.rec.reasons.map((r) => "- " + r.text).join("\n") : "- All provisions pass and no material issues were found.") + `\n\nThis is the system's suggestion. The approver makes the decision and records the rationale.`;
+  return {
+    external: "Companies House, Land Registry and credit bureau checks are not connected in this prototype. In the product, Companies House is checked live and Land Registry and bureau results are mocked for the MVP.",
+    policy: `Assessed against the ${POLICY.name} (${POLICY.version}). Numeric limits are calculated, not judged by the AI.\n\n${pol}`,
+    recommendation: rec,
+    sensitivity: "Calculated in code from the extracted figures. Proposed covenant levels (LTV " + COVENANTS.ltv + "%, ICR " + COVENANTS.icr + "x) are illustrative, not from a lender.\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate."),
+  };
+}
+function refreshSystemSections(c) {
+  if (!c.memo) return;
+  const s = systemSections(c);
+  Object.keys(s).forEach((k) => { const sec = c.memo[k]; if (!sec || sec.by === "System") c.memo[k] = { text: s[k], by: "System", at: nowISO() }; });
+}
+
+/* ------------------------------------------------------------------ the agent run */
+async function runAgents(c, onlyMemo = false) {
+  const imgs = memImages[c.id] || [];
+  const steps = [
+    { id: "intake", agent: "Intake agent", text: `Read ${c.docs.length} document${c.docs.length === 1 ? "" : "s"}: ${c.docs.map((d) => d.name).join(", ")}`, state: "done", at: c.createdAt },
+    { id: "extract", agent: "Extraction agent", text: "Classify documents and extract fields with sources", state: onlyMemo ? "done" : "todo" },
+    { id: "policy", agent: "Policy agent", text: "Run calculated checks against the credit policy", state: onlyMemo ? "done" : "todo" },
+    { id: "memo", agent: "Memo agent", text: "Assess judgement areas and draft the credit memo", state: "todo" },
+  ];
+  c.run = { steps, error: null, running: true };
+  c.status = "New (being read by agents)";
+  render();
+  const set = (id, state, extra) => { const s = steps.find((x) => x.id === id); s.state = state; if (state === "done" || state === "error") s.at = nowISO(); if (extra) s.detail = extra; render(); };
+  try {
+    if (!c.docs.length) throw new Error("No documents could be read. Add a PDF, Word, Excel, text or image file.");
+    if (!onlyMemo) {
+      set("extract", "active");
+      const r = await askAI(extractPrompt(c, imgs), imgs, "extract");
+      normaliseExtraction(c, r);
+      const found = FIELDS.filter((f) => c.fields[f.key].state === "Found").length;
+      set("extract", "done", `${found} of ${FIELDS.length} fields found, ${c.tenants.length} tenant${c.tenants.length === 1 ? "" : "s"}, ${c.consistency.length} consistency flag${c.consistency.length === 1 ? "" : "s"}`);
+      audit(c, "Extraction agent", `Extracted ${found} of ${FIELDS.length} fields with sources; classified ${c.docs.length} documents`, "agent");
+      const b = usable(c, "borrower_name"); const pa = usable(c, "property_address");
+      c.title = b || pa || c.title;
+      set("policy", "active");
+      computeChecks(c); computeAnalysis(c);
+      c.judgements = [];
+      computeRecommendation(c);
+      set("policy", "done", `${c.checks.filter((k) => k.outcome === "Pass").length} pass, ${c.checks.filter((k) => k.outcome === "Fail").length} fail, ${c.checks.filter((k) => k.outcome === "Unclear").length} unclear`);
+      audit(c, "Policy agent", `Ran ${c.checks.length} calculated checks against ${POLICY.name}`, "agent");
+    }
+    set("memo", "active");
+    const m = await askAI(memoPrompt(c), [], "memo");
+    c.judgements = JUDGEMENT_AREAS.map((j) => {
+      const got = (m.judgements || []).find((x) => String(x.area || "").toLowerCase() === j.area.toLowerCase()) || {};
+      const outcome = ["Pass", "Fail", "Unclear"].includes(got.outcome) ? got.outcome : "Unclear";
+      return { id: "j-" + j.area.toLowerCase().replace(/\s+/g, "-"), type: "Reasoned", area: j.area, clause: j.clause, rule: j.rule, value: got.evidence || "", outcome, explanation: got.explanation || "Not assessed.", source: got.source || null, flag: outcome === "Fail" ? "red" : null };
+    });
+    computeRecommendation(c);
+    const prevMemo = c.memo || {};
+    const memo = {};
+    MEMO_SECTIONS.forEach(([k]) => {
+      if (prevMemo[k] && prevMemo[k].by !== "Memo agent" && prevMemo[k].by !== "System") memo[k] = prevMemo[k];
+      else if ((m.memo || {})[k] != null) memo[k] = { text: String(m.memo[k]), by: "Memo agent", at: nowISO() };
+    });
+    c.memo = memo; refreshSystemSections(c);
+    c.brokerRequest = m.broker_request || "";
+    c.memoStale = false;
+    set("memo", "done", `Memo drafted; ${c.judgements.filter((j) => j.outcome !== "Pass").length} judgement area${c.judgements.filter((j) => j.outcome !== "Pass").length === 1 ? "" : "s"} to review`);
+    audit(c, "Memo agent", "Assessed 5 judgement areas and drafted the credit memo", "agent");
+    audit(c, "Policy agent", `Suggested ${c.rec.label}; required approver ${c.rec.approver}`, "agent");
+    c.status = c.decision ? c.status : "With RM";
+  } catch (e) {
+    const s = steps.find((x) => x.state === "active"); if (s) { s.state = "error"; s.at = nowISO(); }
+    c.run.error = e.message || String(e);
+    audit(c, "System", "Agent run stopped: " + c.run.error, "agent");
+  }
+  c.run.running = false;
+  save(); render();
+}
+
+/* ------------------------------------------------------------------ human actions */
+function editField(c, key, newVal) {
+  const f = c.fields[key]; const old = f.value;
+  const v = NUMERIC.has(key) ? parseNum(newVal) : newVal.trim();
+  if (NUMERIC.has(key) && v == null) { toast("Enter a number"); return; }
+  f.value = v; f.state = "Found"; f.edited = { by: "You", at: nowISO(), old };
+  c.consistency = c.consistency.filter((x) => x.key !== key && x.key !== "tenants_sum");
+  applyNA(c);
+  audit(c, "You", `Corrected ${FIELD[key].label}: "${old ?? "blank"}" to "${v}"`);
+  computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c);
+  if (c.memo) c.memoStale = true;
+  save(); render();
+}
+function confirmField(c, key) {
+  const f = c.fields[key]; f.edited = { by: "You", at: nowISO(), old: f.value, confirmed: true }; f.state = "Found";
+  audit(c, "You", `Confirmed ${FIELD[key].label} as "${f.value}"`);
+  computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c); save(); render();
+}
+
+/* ------------------------------------------------------------------ rendering */
+let view = cases.length ? "cases" : "new";
+let selectedField = "annual_rent";
+let srcDocSel = null;
+let editingSection = null;
+let draftDecision = { role: "Underwriter", choice: "", grade: "", rationale: "", conditions: "" };
+const shortMoney = (n) => (n == null || !isFinite(n) ? "-" : n >= 1e6 ? "£" + (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 2).replace(/\.?0+$/, "") + "m" : n >= 1e3 ? "£" + Math.round(n / 1e3) + "k" : "£" + Math.round(n));
+
+function refChip(doc, page, quote, label) {
+  const c = cur(); const d = c && c.docs.find((x) => x.id === doc);
+  const name = label || (d ? `${d.type && d.type !== "Other" ? d.type : d.name.replace(/\.[a-z]+$/i, "")} p.${page || 1}` : `${doc} p.${page || 1}`);
+  return `<button class="ref" type="button" data-src="${esc(doc)}" data-page="${esc(page || 1)}" data-quote="${esc(quote || "")}" title="Open ${esc(d ? d.name : doc)}">${esc(name)}</button>`;
+}
+function renderRich(text) {
+  const blocks = String(text || "").replace(/\r/g, "").split(/\n\s*\n/);
+  const inline = (s) => esc(s).replace(/\[(D\d+)\s*,?\s*p(?:age)?\.?\s*(\d+)\]/gi, (_, d, p) => refChip(d, p, "")).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  const isB = (l) => /^\s*[-•*]\s+/.test(l) && !/^\s*\*\*/.test(l);
+  return blocks.map((b) => {
+    const lines = b.split("\n").filter((l) => l.trim());
+    let html = "", list = [], para = [];
+    const flushL = () => { if (list.length) html += "<ul>" + list.map((l) => "<li>" + inline(l.replace(/^\s*[-•*]\s+/, "")) + "</li>").join("") + "</ul>"; list = []; };
+    const flushP = () => { if (para.length) html += "<p>" + para.map(inline).join("<br>") + "</p>"; para = []; };
+    lines.forEach((l) => { if (isB(l)) { flushP(); list.push(l); } else { flushL(); para.push(l); } });
+    flushP(); flushL();
+    return html;
+  }).join("");
+}
+function outcomeChip(k) {
+  if (k.outcome === "Pass" && k.flag === "amber") return `<span class="chip c-amber">Pass, watch</span>`;
+  const cls = { Pass: "o-pass", Fail: "o-fail", Unclear: "o-unclear", "N/A": "o-na" }[k.outcome] || "o-na";
+  return `<span class="chip ${cls}">${esc(k.outcome === "N/A" ? "Not applicable" : k.outcome)}</span>`;
+}
+const recChipClass = (kind) => ({ approve: "c-green", decline: "c-red", more: "c-amber", escalate: "c-blue" }[kind] || "c-grey");
+function pageHead(title, crumb, intro) {
+  return `<div class="pagehead"><h1>${esc(title)}</h1><div class="crumb">Demo lender › ${esc(crumb || title)}</div></div>${intro ? `<p class="intro">${intro}</p>` : ""}`;
+}
+const protoNote = `<div class="proto"><b>Prototype.</b> Use made-up or anonymised deal packs only. Documents are sent to the AI provider shown in the sidebar. The agents prepare the case; a person makes every credit decision.</div>`;
+function missingCount(c) { return c.fields ? FIELDS.filter((f) => { const x = c.fields[f.key]; const need = f.mandatory || (f.mandatoryIf === "purchase" && x.state !== "Not applicable"); return need && !x.edited && x.state !== "Found" && x.state !== "Not applicable"; }).length : 0; }
+
+function renderNav() {
+  const c = cur();
+  const item = (id, label, badge, disabled) => `<button class="nav" type="button" data-view="${id}" ${view === id ? 'aria-current="page"' : ""} ${disabled ? "disabled" : ""}><span>${label}</span>${badge != null ? `<span class="badge">${badge}</span>` : ""}</button>`;
+  $("#navCases").innerHTML = `<div class="navlabel">Cases</div>${item("new", "New case")}${item("cases", "My cases", cases.length)}${item("case", "Case management", null, !c)}`;
+  $("#navAdmin").innerHTML = `<div class="navlabel">Administration</div>${item("policy", "Credit policies")}${item("agents", "AI governance")}`;
+}
+
+function renderNew() {
+  const samples = SAMPLES ? Object.entries(SAMPLES).map(([k, s]) => `<div class="sample"><b>${esc(s.label)}</b><span>${esc(s.blurb)}</span><button class="btn small" type="button" data-sample="${k}">Run the agents</button></div>`).join("") : `<p class="hint">Sample packs are not included in this copy.</p>`;
+  return pageHead("New case", "New case", "Upload the broker's deal pack. The agents read every document, extract the application fields with links to their source, run the credit policy checks and draft the credit memo. You check their work and make the decision.") + protoNote +
+    `<div class="grid2 even">
+      <div class="card"><h2>Upload a deal pack</h2>
+        <div class="drop" id="drop"><p>Drop the broker email and attachments here: valuation, tenancy schedule, leases, accounts. PDF, Word, Excel, text or images.</p><button class="btn primary" type="button" data-act="pick">Choose files</button></div>
+        <p class="hint">Tip: save the broker's email as a PDF or text file and include it with the attachments.</p>
+      </div>
+      <div class="card"><h2>Sample packs</h2><p class="hint">Fictional packs based on the test cases in the broker submission requirements: clean, incomplete and inconsistent.</p>${samples}</div>
+    </div>`;
+}
+
+function caseRow(c) {
+  const L = c.fields ? num(c, "loan_amount") : null;
+  const miss = missingCount(c); const mism = c.consistency ? c.consistency.length : 0;
+  const complete = !c.fields ? `<span class="chip c-grey">Reading</span>` : miss ? `<span class="chip c-amber">${miss} missing</span>` : `<span class="chip c-green">Complete</span>`;
+  const consistent = !c.fields ? "" : mism ? `<span class="chip c-amber">${mism} mismatch</span>` : `<span class="chip c-green">Consistent</span>`;
+  const rec = c.rec && c.memo ? `<span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label.split(" (")[0])}</span>` : c.run && c.run.error ? `<span class="chip c-red">Run stopped</span>` : `<span class="chip c-grey">Pending</span>`;
+  return `<tr><td class="num">${dateOf(c.createdAt)} ${timeOf(c.createdAt)}<span class="sub">uploaded</span></td>
+    <td><b>${esc(c.title)}</b><span class="sub">${esc(c.ref)}${c.fields && usable(c, "broker") ? " · " + esc(usable(c, "broker")) : ""}</span></td>
+    <td class="fv">${shortMoney(L)}</td><td>${complete}</td><td>${consistent}</td><td>${esc(c.status)}</td><td>${rec}</td>
+    <td><button class="btn primary small" type="button" data-case="${c.id}">Open case</button></td></tr>`;
+}
+function renderCases() {
+  const done = cases.filter((c) => c.rec && c.memo);
+  const cc = done.filter((c) => c.rec.complete && c.rec.consistent).length;
+  const more = done.filter((c) => c.rec.kind === "more").length;
+  const exc = done.filter((c) => c.rec.kind === "escalate" || c.rec.kind === "decline").length;
+  return pageHead("My cases", "My cases", "Every deal pack you have run through the agents, with what they found. You check the agents' work and prepare the case.") +
+    `<div class="stats">
+      <div class="stat"><b>${cases.length}</b><span>Cases in this browser</span><small>Read by the agents</small></div>
+      <div class="stat"><b>${cc}</b><span>Complete and consistent</span><small>Ready for you to check</small></div>
+      <div class="stat"><b>${more}</b><span>Need more information</span><small>Request drafted for the broker</small></div>
+      <div class="stat"><b>${exc}</b><span>Exceptions or declines</span><small>Outside policy or appetite</small></div>
+    </div>` +
+    (cases.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Received</th><th>Borrower and broker</th><th>Loan</th><th>Complete</th><th>Consistent</th><th>Status</th><th>Recommendation</th><th></th></tr></thead><tbody>${cases.map(caseRow).join("")}</tbody></table></div>`
+      : `<div class="card"><h2>No cases yet</h2><p class="hint">Upload a deal pack or run one of the sample packs.</p><div><button class="btn primary" type="button" data-view="new">New case</button></div></div>`);
+}
+
+function tile(k, v, s, tone) { return `<div class="tile ${tone || ""}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s || "&nbsp;"}</div></div>`; }
+function renderCaseView(c) {
+  const ready = !!c.fields;
+  const L = ready ? num(c, "loan_amount") : null, T = ready ? num(c, "loan_term_years") : null, V = ready ? num(c, "property_value") : null;
+  const ltv = c.checks.find((k) => k.id === "ltv"), icr = c.checks.find((k) => k.id === "icr");
+  const miss = missingCount(c), mism = c.consistency.length;
+  const toCheck = ready ? FIELDS.filter((f) => { const x = c.fields[f.key]; return !x.edited && (x.state === "Not confident" || (x.state === "Not present" && (f.mandatory || f.mandatoryIf))); }).length : 0;
+  const flags = c.checks.concat(c.judgements).filter((k) => k.flag === "red" || k.flag === "amber").length + mism;
+  const broker = ready ? usable(c, "broker") : null;
+  const sub = [broker ? "From " + broker : "Uploaded", "received " + dateOf(c.createdAt) + " " + timeOf(c.createdAt), ready ? (miss || mism ? [miss ? miss + " missing" : "", mism ? mism + " mismatch" : ""].filter(Boolean).join(", ") : "complete and consistent") : "agents reading", "policy: illustrative UK market standard"].join(" · ");
+  const rb = ready ? String(usable(c, "repayment_basis") || "").toLowerCase() : "";
+  const recTone = c.rec && c.memo ? { approve: "green", decline: "red", more: "amber", escalate: "blue" }[c.rec.kind] : "";
+  const tabs = [["memo", "Credit memo"], ["source", "Source check", toCheck ? `<span class="chip c-amber">${toCheck} to check</span>` : ""], ["policy", "Policy checks", flags ? `<span class="chip c-amber">${flags} flag${flags > 1 ? "s" : ""}</span>` : ""], ["decision", "Decision"], ["audit", "Audit"]];
+  let body;
+  if (!ready && currentTab !== "audit") body = renderWorking(c);
+  else body = { memo: renderMemoTab, source: renderSource, policy: renderPolicyTab, decision: renderDecision, audit: renderAudit }[currentTab](c);
+  return pageHead("Case management", "Case management") + `
+  <div class="casecard">
+    <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.status)}</span><span style="flex:1"></span><button class="btn small" type="button" data-act="delete-case">Delete case</button></div>
+    <div class="subline">${esc(sub)}</div>
+    <div class="tiles">
+      ${tile("Facility", shortMoney(L), T != null ? `${T} years${rb ? ", " + esc(rb) : ""}` : "")}
+      ${tile("LTV", ltv ? esc(ltv.value) : "-", V != null ? `on ${shortMoney(V)} ${/estimate/i.test(String(usable(c, "value_basis") || "")) ? "estimate" : "valuation"}` : "", ltv && ltv.outcome === "Fail" ? "red" : "")}
+      ${tile("Interest cover", icr ? esc(icr.value) : "-", `policy minimum ${POLICY.minICR}x`, icr && icr.outcome === "Fail" ? "red" : "")}
+      ${tile("Recommendation", c.rec && c.memo ? esc(c.rec.label.split(" (")[0]) : "-", c.rec && c.memo ? esc(c.rec.approver.split(" (")[0]) + " decides" : "", recTone)}
+      ${tile("Risk grade", c.decision && c.decision.grade ? c.decision.grade + " of 10" : "Not set", "set by the Underwriter")}
+      ${tile("Fields found", ready ? `${FIELDS.filter((f) => c.fields[f.key].state === "Found").length} of ${FIELDS.length}` : "-", ready ? (toCheck ? `${toCheck} for you to check` : "nothing to check") : "")}
+    </div>
+  </div>
+  <div class="tabs" role="tablist">${tabs.map(([id, name, extra]) => `<button class="tab" role="tab" type="button" aria-selected="${currentTab === id}" data-tab="${id}">${name}${extra || ""}</button>`).join("")}</div>
+  ${body}`;
+}
+function renderAgents(c) {
+  if (!c.run) return "";
+  return `<div class="card"><div class="cardhead"><h2>Agents at work</h2>${c.run.running ? `<span class="chip c-amber">Working</span>` : c.run.error ? `<span class="chip c-red">Stopped</span>` : `<span class="chip c-green">Case ready</span>`}</div>
+    <div class="timeline">${c.run.steps.map((s) => `<div class="tl"><span class="time">${s.at ? timeOf(s.at) : ""}</span><div><b>${esc(s.agent)}</b>${s.state === "done" ? `<span class="chip c-green">Done</span>` : s.state === "active" ? `<span class="spin" aria-label="Working"></span>` : s.state === "error" ? `<span class="chip c-red">Stopped</span>` : `<span class="chip c-grey">Waiting</span>`}<p>${esc(s.detail || s.text)}</p></div></div>`).join("")}</div>
+    ${c.run.error ? `<div class="errbox"><b>The run stopped.</b> ${esc(c.run.error)}</div><div class="row"><button class="btn primary" type="button" data-act="rerun">Run the agents again</button><button class="btn" type="button" data-act="settings">Change AI provider</button></div>` : ""}
+    ${!c.run.running && !c.run.error ? `<div><button class="btn small" type="button" data-act="rerun">Run all agents again</button></div>` : ""}</div>`;
+}
+function renderDocs(c) {
+  return `<div class="card"><h2>Documents</h2><div class="tablewrap bare"><table class="t"><tbody>${c.docs.map((d) => `<tr><td>${refChip(d.id, 1, "", d.id)}</td><td><b>${esc(d.name)}</b><span class="sub">${esc(d.type || "Not classified yet")}${d.date ? " · " + esc(d.date) : ""} · ${d.pages.length} page${d.pages.length > 1 ? "s" : ""}</span>${d.summary ? `<span class="sub">${esc(d.summary)}</span>` : ""}</td></tr>`).join("")}</tbody></table></div></div>`;
+}
+function renderWorking(c) {
+  return `<div class="grid2"><div class="stack">${renderAgents(c)}</div><div class="stack">${renderDocs(c)}</div></div>`;
+}
+function renderMemoTab(c) {
+  const r = c.rec;
+  if (!c.memo) return renderWorking(c);
+  const recbar = `<div class="recbar"><div class="line"><span>Recommendation (a suggestion; a person decides)</span><span class="chip ${recChipClass(r.kind)}">${esc(r.label)}</span><span class="note">Approver: ${esc(r.approver)}</span></div>
+    ${r.reasons.length ? `<ol>${r.reasons.slice(0, 6).map((x) => `<li>${esc(x.text)}</li>`).join("")}</ol>` : `<p class="note">All provisions pass and no material issues were found.</p>`}</div>`;
+  const stale = c.memoStale ? `<div class="stale"><span>Figures changed after the memo was drafted. The policy assessment and recommendation are updated; the written sections are not.</span><button class="btn small" type="button" data-act="redraft">Redraft agent sections</button></div>` : "";
+  const memo = `<div class="card"><div class="cardhead"><h2>Credit memo</h2><div class="row"><span class="chip c-amber">Draft</span><button class="btn small" type="button" data-act="copy-memo">Copy memo</button></div></div>
+    <div class="legend"><span><i style="background:var(--muted)"></i>Drafted by the memo agent until a person edits a section. Every edit is audited.</span><span><i style="background:var(--accent)"></i>Red tags open the source document and page.</span></div>
+    ${MEMO_SECTIONS.map(([k, name]) => {
+      const s = c.memo[k] || { text: "", by: "Memo agent" };
+      const by = s.by === "You" ? `Edited by you at ${timeOf(s.at)}` : s.by === "System" ? "From the calculated checks" : "Memo agent";
+      const body = editingSection === k ? `<textarea class="ed" id="memoEdit" aria-label="${esc(name)}">${esc(s.text)}</textarea><div class="row"><button class="btn primary small" type="button" data-act="save-sec" data-key="${k}">Save</button><button class="btn small" type="button" data-act="cancel-sec">Cancel</button></div>` : `<div class="memo-body">${renderRich(s.text) || '<p class="note">Empty</p>'}</div>`;
+      return `<section class="memo-sec"><header><h3>${esc(name)}</h3><span class="by">${by}</span><span class="grow"></span>${editingSection === k ? "" : `<button class="btn small" type="button" data-act="edit-sec" data-key="${k}">Edit</button>`}</header>${body}</section>`;
+    }).join("")}</div>`;
+  const req = c.brokerRequest ? `<div class="card"><div class="cardhead"><h2>Request to the broker</h2><span class="chip c-amber">Drafted</span></div><p class="hint">Drafted by the memo agent. Edit it, then copy it into your email. Nothing is sent from here.</p><textarea class="ed" id="brokerReq" aria-label="Request to the broker">${esc(c.brokerRequest)}</textarea><div class="row"><button class="btn" type="button" data-act="copy-req">Copy email</button><button class="btn" type="button" data-act="log-req">Mark as sent</button></div></div>` : "";
+  return `<div class="grid2"><div class="stack">${recbar}${stale}${memo}</div><div class="stack">${renderAgents(c)}${req}${renderDocs(c)}</div></div>`;
+}
+
+function highlight(text, quote) {
+  let html = esc(text); let found = false;
+  if (quote) {
+    const words = quote.trim().split(/\s+/).map((w) => esc(w).replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+    for (const n of [words.length, Math.min(5, words.length), Math.min(3, words.length)]) {
+      if (!n) break;
+      const re = new RegExp(words.slice(0, n).join("\\s+"), "i");
+      if (re.test(html)) { html = html.replace(re, (m) => `<mark>${m}</mark>`); found = true; break; }
+    }
+  }
+  return { html, found };
+}
+function pageView(c, docId, page, quote) {
+  const d = c.docs.find((x) => x.id === docId); if (!d) return `<p class="hint">Document not found.</p>`;
+  page = Math.min(Math.max(1, +page || 1), d.pages.length);
+  const img = (memImages[c.id] || []).find((im) => im.doc === docId && im.page === page);
+  const h = highlight(d.pages[page - 1] || "", quote);
+  const nav = d.pages.length > 1 ? d.pages.map((_, i) => `<button class="btn small ${i + 1 === page ? "primary" : ""}" type="button" data-pagesel="${i + 1}" data-doc="${d.id}">p.${i + 1}</button>`).join("") : "";
+  return `<div class="pagebox"><div class="ph"><span>${esc(d.name)}</span><span class="row">${nav || "Page 1 of 1"}</span></div>${img ? `<img class="pageimg" alt="${esc(d.name)} page ${page}" src="data:${img.mime};base64,${img.b64}">` : `<div class="pagetext">${h.html || "(No text on this page)"}</div>`}</div>${quote && !h.found && !img ? `<p class="note">The agent quoted "${esc(quote)}", which is not word for word on this page.</p>` : ""}`;
+}
+function pickField(c) {
+  if (!c.fields) return "annual_rent";
+  const m = c.consistency.find((y) => FIELD[y.key]); if (m) return m.key;
+  const f = FIELDS.find((f) => ["Not present", "Not confident"].includes(c.fields[f.key].state) && !c.fields[f.key].edited);
+  return f ? f.key : "annual_rent";
+}
+function renderSource(c) {
+  if (!FIELD[selectedField] || selectedField === "__auto") selectedField = pickField(c);
+  let g = ""; let list = "";
+  FIELDS.forEach((f) => {
+    const x = c.fields[f.key];
+    if (f.group !== g) { g = f.group; list += `<div class="fgroup">${g}</div>`; }
+    const val = x.value == null || x.value === "" ? "" : f.type === "money" ? money(x.value) : String(x.value);
+    const more = (x.candidates || []).filter((k) => k.doc).length - 1;
+    const d = x.source ? c.docs.find((y) => y.id === x.source.doc) : null;
+    const chip = !x.edited && c.consistency.some((y) => y.key === f.key) ? `<span class="chip c-amber">Mismatch</span>` : x.edited ? `<span class="chip c-green">${x.edited.confirmed ? "Confirmed" : "Corrected"}</span>` : `<span class="chip ${stateClass(x.state)}">${esc(x.state)}</span>`;
+    list += `<button type="button" class="frow ${selectedField === f.key ? "sel" : ""}" data-field="${f.key}"><span class="k">${esc(f.label)}</span>${chip}<span class="v">${esc(val) || '<span class="note">Blank</span>'}</span>${x.source ? `<span class="from">From ${esc(d ? d.type || d.name : x.source.doc)} p.${esc(x.source.page)}${more > 0 ? ` + ${more} more` : ""}</span>` : x.note ? `<span class="note">${esc(x.note)}</span>` : ""}</button>`;
+  });
+  const f = FIELD[selectedField]; const x = c.fields[selectedField];
+  const val = x.value == null || x.value === "" ? "Blank" : f.type === "money" ? money(x.value) : String(x.value);
+  const cands = (x.candidates || []).filter((k) => k.doc);
+  const flag = c.consistency.find((y) => y.key === selectedField);
+  const showDoc = srcDocSel && srcDocSel.field === selectedField ? srcDocSel : x.source ? { doc: x.source.doc, page: x.source.page, quote: x.source.quote } : cands[0] ? { doc: cands[0].doc, page: cands[0].page, quote: cands[0].quote } : null;
+  const usedLine = x.edited ? `${x.edited.confirmed ? "Confirmed" : "Corrected"} by you at ${timeOf(x.edited.at)}${!x.edited.confirmed ? `. Was "${esc(x.edited.old ?? "blank")}".` : "."}` : flag ? esc(flag.text) : x.source && cands.length > 1 ? `Found in ${cands.length} places and they agree.` : x.source ? "Found in one document." : esc(x.note || "Not found in the pack.");
+  const detail = `<div class="card sticky">
+    <div class="cardhead"><h2>${esc(f.label)}: ${esc(val)}</h2>${x.edited ? `<span class="chip c-green">${x.edited.confirmed ? "Confirmed" : "Corrected"}</span>` : flag ? `<span class="chip c-amber">Mismatch</span>` : `<span class="chip ${stateClass(x.state)}">${esc(x.state)}</span>`}</div>
+    <p class="hint">${usedLine}</p>
+    ${cands.length ? `<div class="label">Found in ${cands.length} place${cands.length > 1 ? "s" : ""}</div><div class="docbtns">${cands.map((k, i) => { const d = c.docs.find((y) => y.id === k.doc); const isUsed = x.source && k.doc === x.source.doc && String(k.page) === String(x.source.page) && i === cands.indexOf(cands.find((z) => z.doc === x.source.doc && String(z.page) === String(x.source.page))); const v = NUMERIC.has(f.key) && k.num != null ? (f.type === "money" ? money(k.num) : k.num) : k.value; return `<button class="docbtn ${isUsed ? "used" : ""} ${showDoc && showDoc.doc === k.doc && String(showDoc.page) === String(k.page) ? "on" : ""}" type="button" data-showdoc="${esc(k.doc)}" data-page="${esc(k.page || 1)}" data-quote="${esc(k.quote || "")}">${esc(d ? d.type || d.name : k.doc)} p.${esc(k.page || 1)}: ${esc(v)}${isUsed ? " (used)" : ""}</button>`; }).join("")}</div>` : ""}
+    ${showDoc ? pageView(c, showDoc.doc, showDoc.page, showDoc.quote) : ""}
+    <div id="editArea" class="row"><button class="btn small" type="button" data-act="edit-field" data-key="${f.key}">Correct value</button>${x.state === "Not confident" && !x.edited ? `<button class="btn small" type="button" data-act="confirm-field" data-key="${f.key}">Confirm value</button>` : ""}</div>
+  </div>`;
+  const tenants = `<div class="card"><h2>Tenants</h2>${c.tenants.length ? `<div class="tablewrap bare"><table class="t"><thead><tr><th>Tenant</th><th>Rent pa</th><th>Lease end</th><th>Break</th><th>Source</th></tr></thead><tbody>${c.tenants.map((t) => `<tr><td>${esc(t.name)}${t.note ? `<span class="sub">${esc(t.note)}</span>` : ""}</td><td class="num">${money(t.annual_rent)}</td><td class="num">${t.lease_end ? esc(t.lease_end) : '<span class="chip c-amber">Not confident</span>'}</td><td class="num">${esc(t.break_date || "-")}</td><td>${t.source && t.source.doc ? refChip(t.source.doc, t.source.page, t.source.quote) : ""}</td></tr>`).join("")}</tbody></table></div>` : `<p class="hint">No tenancy schedule or leases in the pack.</p>`}</div>`;
+  return `<p class="intro">Check the agents' work. Pick any field to see the document it came from, with the text highlighted, and every other document that mentions it. Corrections are audited and the checks recalculate.</p>
+    <div class="grid2 even"><div class="stack"><div class="fieldlist">${list}</div>${tenants}</div><div>${detail}</div></div>`;
+}
+function renderPolicyTab(c) {
+  const flagCards = [];
+  c.consistency.forEach((x) => flagCards.push({ tone: "amber", label: "Amber", title: "Mismatch: " + (FIELD[x.key] ? FIELD[x.key].label : "Rent"), text: x.text, refs: (x.cands || []).filter((k) => k.doc) }));
+  c.checks.concat(c.judgements).forEach((k) => {
+    if (k.flag === "red" || k.outcome === "Fail") flagCards.push({ tone: "red", label: "Red", title: k.area, text: k.type === "Reasoned" ? k.explanation : k.why, refs: k.source && k.source.doc ? [k.source] : [] });
+    else if (k.flag === "amber") flagCards.push({ tone: "amber", label: "Amber", title: k.area, text: k.why || k.explanation, refs: [] });
+  });
+  ["ltv", "icr", "wault"].forEach((id) => { const k = c.checks.find((x) => x.id === id); if (k && k.outcome === "Pass" && !k.flag) flagCards.push({ tone: "green", label: "Green", title: k.area + " " + k.value, text: k.why, refs: [] }); });
+  const row = (k) => `<tr><td><b>${esc(k.area)}</b><span class="sub">${esc(k.clause)}</span></td><td>${esc(k.rule)}</td><td class="fv">${esc(k.type === "Reasoned" ? "" : k.value)}</td><td>${outcomeChip(k)}</td><td>${esc(k.type === "Reasoned" ? k.explanation : k.why)}${k.type === "Reasoned" && k.value ? `<span class="sub">Evidence: ${esc(k.value)}</span>` : ""}${k.source && k.source.doc ? " " + refChip(k.source.doc, k.source.page, "") : ""}</td></tr>`;
+  return `<div class="stack">
+    ${flagCards.length ? `<div class="flags">${flagCards.map((f) => `<div class="flag ${f.tone}"><div class="row"><span class="chip ${f.tone === "red" ? "c-red" : f.tone === "amber" ? "c-amber" : "c-green"}">${f.label}</span><b>${esc(f.title)}</b></div><p>${esc(f.text)}</p>${f.refs.length ? `<div class="row">${f.refs.map((r) => refChip(r.doc, r.page, r.quote)).join("")}</div>` : ""}</div>`).join("")}</div>` : ""}
+    <div class="card"><h2>Calculated checks</h2><p class="hint">Worked out in code from the extracted figures, so the answer is exact and repeatable. The AI does not judge these. ${esc(POLICY.name)}, ${esc(POLICY.version)}.</p><div class="tablewrap"><table class="t"><thead><tr><th>Provision</th><th>Policy</th><th>Case</th><th>Outcome</th><th>Explanation</th></tr></thead><tbody>${c.checks.map(row).join("")}</tbody></table></div></div>
+    ${(c.analysis || []).length ? `<div class="card"><h2>Sensitivities and covenant headroom</h2><p class="hint">Calculated in code. Proposed covenants (LTV ${COVENANTS.ltv}%, ICR ${COVENANTS.icr}x) are illustrative, not from a lender.</p><div class="tablewrap"><table class="t"><thead><tr><th>Measure</th><th>Result</th><th>Comment</th></tr></thead><tbody>${c.analysis.map((a) => `<tr><td><b>${esc(a.label)}</b></td><td class="fv">${esc(a.value)}</td><td>${esc(a.note)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
+    <div class="card"><h2>Judgement areas</h2><p class="hint">Assessed by the memo agent and explained, for a person to read and agree or not.</p>${c.judgements.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Provision</th><th>Policy</th><th></th><th>Outcome</th><th>Explanation</th></tr></thead><tbody>${c.judgements.map(row).join("")}</tbody></table></div>` : `<p class="hint">Not assessed yet.</p>`}</div>
+  </div>`;
+}
+function authority(c, role) {
+  const L = num(c, "loan_amount") || 0; const exc = c.rec && c.rec.exceptions.length;
+  if (L > POLICY.maxLoan) return { canApprove: false, why: "Over £10m is outside appetite. No one can approve it." };
+  if (role === "Underwriter") {
+    if (L > POLICY.uwLimit) return { canApprove: false, why: "Over £1m, so only Credit Committee can approve. You can escalate." };
+    if (exc) return { canApprove: false, why: "Policy exception, so only Credit Committee can approve. You can escalate." };
+  }
+  return { canApprove: true, why: "" };
+}
+function renderDecision(c) {
+  if (!c.rec || !c.memo) return renderWorking(c);
+  const L = num(c, "loan_amount");
+  const side = `<div class="stack"><div class="card"><h2>Approval authority</h2>
+      <div class="signoff"><div><b>Underwriter</b><span>Up to £1m within policy</span></div>${c.rec.approver.startsWith("Underwriter") ? `<span class="chip c-green">Can decide</span>` : `<span class="chip c-grey">Escalate</span>`}</div>
+      <div class="signoff"><div><b>Credit Committee</b><span>Over £1m to £10m, and all policy exceptions</span></div>${c.rec.approver.startsWith("Credit") ? `<span class="chip c-green">Decides this case</span>` : `<span class="chip c-grey">If escalated</span>`}</div>
+      <p class="hint">Loan ${money(L)}${c.rec.exceptions.length ? "; policy exception: " + esc(c.rec.exceptions.join(", ")) : "; no policy exception"}. Limits come from the lender's credit policy. Neither admin role can approve credit.</p></div></div>`;
+  if (c.decision) {
+    const d = c.decision;
+    return `<div class="grid2"><div class="card"><div class="cardhead"><h2>Decision recorded</h2><span class="chip ${recChipClass({ "Approve": "approve", "Decline": "decline", "Request more information": "more", "Escalate to Credit Committee": "escalate" }[d.choice])}">${esc(d.choice)}</span></div>
+      <p class="hint">By you as ${esc(d.role)}, ${dateOf(d.at)} ${timeOf(d.at)}. Risk grade ${esc(d.grade || "not set")}.${d.override ? ` This differs from the suggestion (${esc(c.rec.label)}). Overrides are recorded and are a normal part of the process.` : ""}</p>
+      <div class="memo-sec"><header><h3>Rationale</h3></header><div class="memo-body">${renderRich(d.rationale)}</div></div>
+      ${d.conditions ? `<div class="memo-sec"><header><h3>Conditions</h3></header><div class="memo-body">${renderRich(d.conditions)}</div></div>` : ""}
+      <div><button class="btn small" type="button" data-act="reopen">Reopen the decision</button></div></div>${side}</div>`;
+  }
+  const dd = draftDecision; const au = authority(c, dd.role);
+  const opts = [
+    ["Approve", "Indicative terms can be prepared.", !au.canApprove, au.why],
+    ["Decline", "The broker gets a polite decline.", false, ""],
+    ["Request more information", "Back to the RM to ask the broker.", false, ""],
+    ["Escalate to Credit Committee", "Above your limit or a policy exception.", dd.role !== "Underwriter", "Already with Credit Committee."],
+  ];
+  if (dd.choice && opts.find((o) => o[0] === dd.choice && o[2])) dd.choice = "";
+  const condSuggest = c.memo && c.memo.conditions ? c.memo.conditions.text : "";
+  return `<div class="grid2"><div class="stack">
+    <div class="recbar"><div class="line"><span>Recommendation (a suggestion; a person decides)</span><span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label)}</span></div><p class="note">You can agree with it or override it. Either way, record your reasons.</p></div>
+    <div class="card"><h2>Risk grade and conditions</h2>
+      <div class="field"><label for="decGrade">Risk grade (1 best, 10 worst)</label><select id="decGrade"><option value="">Choose a grade</option>${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<option ${String(dd.grade) === String(n) ? "selected" : ""}>${n}</option>`).join("")}</select></div>
+      <div class="field"><label for="decConditions">Conditions</label><textarea class="ed" id="decConditions" placeholder="One condition per line, starting with -">${esc(dd.conditions)}</textarea>${condSuggest ? `<div><button class="btn small" type="button" data-act="use-conds">Use the memo's suggested conditions</button></div>` : ""}</div>
+    </div>
+    <div class="card"><h2>Credit decision</h2>
+      <div class="field"><label for="decRole">Acting as</label><select id="decRole"><option ${dd.role === "Underwriter" ? "selected" : ""}>Underwriter</option><option ${dd.role === "Credit Committee" ? "selected" : ""}>Credit Committee</option></select></div>
+      <div class="choices">${opts.map(([name, desc, dis, why]) => `<label class="choice ${dis ? "disabled" : ""}"><input type="radio" name="decChoice" value="${esc(name)}" ${dis ? "disabled" : ""} ${dd.choice === name ? "checked" : ""}><span><b>${esc(name)}</b><small>${esc(dis && why ? why : desc)}</small></span></label>`).join("")}</div>
+      <div class="field"><label for="decRationale">Rationale (required)</label><textarea class="ed" id="decRationale" placeholder="Why you made this decision">${esc(dd.rationale)}</textarea></div>
+      <div class="row"><button class="btn primary" type="button" data-act="record">Record decision</button><span class="note" id="decMsg"></span></div>
+    </div></div>${side}</div>`;
+}
+function renderAudit(c) {
+  return `<div class="card"><h2>Audit trail</h2><p class="hint">Every agent and human action on this case, oldest first. Policy version: ${esc(POLICY.version)}.</p><ul class="audit">${c.audit.map((a) => `<li><span class="num note">${timeOf(a.at)}</span><span class="who ${a.kind === "agent" ? "agent" : ""}">${esc(a.who)}</span><span class="what">${esc(a.what)}</span></li>`).join("")}</ul></div>`;
+}
+function renderPolicyAdmin() {
+  const P = POLICY;
+  const rows = [
+    ["Loan size", "£250,000 to £10,000,000", "Calculated"], ["Loan term", "3 to 15 years; up to 25 years capital repayment", "Calculated"],
+    ["Loan to value (LTV)", `Up to ${P.maxLTV}% of market value; up to ${P.maxLTVSingle}% for specialist or single-let property`, "Calculated"],
+    ["Interest cover (ICR)", `Rent covers interest at least ${P.minICR} times, at the higher of the pay rate or a ${P.stressRate}% stressed rate`, "Calculated"],
+    ["Debt service cover (DSCR)", `At least ${P.minDSCR} times where the loan amortises`, "Calculated"],
+    ["Location", "England, Wales, Scotland and Northern Ireland", "Calculated"],
+    ["Energy rating", "EPC E or better", "Calculated"],
+    ["Income quality", `WAULT of at least ${P.minWAULT} years; flag where one tenant pays over ${P.concentration}% of rent; tenant covenant strength`, "Mixed"],
+    ["Document age", `Accounts year end within the last ${P.accountsMonths} months`, "Calculated"],
+    ["Property type", "Retail, office, industrial and mixed use. Specialist uses by exception", "Reasoned"],
+    ["Borrower", "UK limited company or SPV; personal guarantees from principal directors", "Reasoned"],
+    ["Experience", "Borrower or directors have relevant property investment experience", "Reasoned"],
+    ["Adverse credit", "No unsatisfied CCJs or insolvency events; explained historic adverse considered", "Reasoned"],
+    ["Approval authority", "Underwriter up to £1m within policy; Credit Committee over £1m to £10m and all exceptions; over £10m outside appetite", "Calculated"],
+  ];
+  return pageHead("Credit policies", "Credit policies", "The policy the agents test each case against. This prototype uses the illustrative UK market standard policy from the broker submission flow doc. In the product, the Client Admin uploads the lender's own policy and an agent extracts the rules with links to each clause.") +
+    `<div class="tablewrap"><table class="t"><thead><tr><th>Policy area</th><th>Criterion</th><th>Check type</th></tr></thead><tbody>${rows.map((r) => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td><span class="chip ${r[2] === "Calculated" ? "c-blue" : r[2] === "Mixed" ? "c-amber" : "c-grey"}">${r[2]}</span></td></tr>`).join("")}</tbody></table></div>
+    <p class="note" style="margin-top:10px">${esc(P.version)}. Figures are inferred from market norms, not taken from a lender.</p>`;
+}
+function renderAgentsAdmin() {
+  const p = activeProvider();
+  const agents = [
+    ["Intake agent", "Reads each uploaded document: PDF text, Word, Excel, emails and scanned images.", "In the browser"],
+    ["Extraction agent", "Classifies each document and extracts the application fields with the document, page and exact text, using four states.", PROVIDERS[p].name],
+    ["Policy agent", "Calculates loan size, term, LTV, ICR, DSCR, location, EPC, WAULT, concentration and document age, and suggests a recommendation.", "Code, no AI"],
+    ["Memo agent", "Assesses the judgement areas, drafts the credit memo with sources and drafts a request to the broker.", PROVIDERS[p].name],
+  ];
+  return pageHead("AI governance", "AI governance", "The agents in this prototype, what each one does and what runs it. Every agent action is in each case's audit trail.") +
+    `<div class="tablewrap"><table class="t"><thead><tr><th>Agent</th><th>What it does</th><th>Runs on</th></tr></thead><tbody>${agents.map((a) => `<tr><td><b>${a[0]}</b></td><td>${a[1]}</td><td>${esc(a[2])}</td></tr>`).join("")}</tbody></table></div>
+    <div class="row" style="margin-top:14px"><button class="btn" type="button" data-act="settings">Change AI provider</button></div>`;
+}
+function render() {
+  renderNav();
+  const c = cur();
+  if (view === "case" && !c) view = cases.length ? "cases" : "new";
+  const html = { new: renderNew, cases: renderCases, policy: renderPolicyAdmin, agents: renderAgentsAdmin }[view];
+  $("#main").innerHTML = view === "case" ? renderCaseView(c) : html();
+}
+
+/* ------------------------------------------------------------------ source pop-out (from memo and policy tags) */
+function openSource(docId, page, quote) {
+  const c = cur(); if (!c) return;
+  const d = c.docs.find((x) => x.id === docId);
+  if (!d) { toast("That document is not in this case"); return; }
+  $("#srcTitle").textContent = `${d.type ? d.type + ": " : ""}${d.name}`;
+  $("#srcBody").innerHTML = pageView(c, docId, page, quote);
+  $("#srcBody").dataset.doc = docId;
+  $("#sourceModal").hidden = false;
+  const m = $("#srcBody mark"); if (m) m.scrollIntoView({ block: "center" });
+}
+
+/* ------------------------------------------------------------------ settings */
+function renderSettings() {
+  const p = settings.provider;
+  const opt = (id, name, desc, extra = "") => `<label class="choice"><input type="radio" name="prov" value="${id}" ${p === id ? "checked" : ""}><span><b>${esc(name)}</b><small>${esc(desc)}</small></span></label>${extra}`;
+  $("#providerOpts").innerHTML =
+    opt("auto", "Automatic", "Claude (built in) inside the NashFlow link; Gemini when you open the downloaded copy.") +
+    opt("claude-builtin", PROVIDERS["claude-builtin"].name, PROVIDERS["claude-builtin"].desc) +
+    opt("gemini", PROVIDERS.gemini.name, PROVIDERS.gemini.desc) +
+    `<div class="cfg"><label for="gKey">Gemini API key</label><input id="gKey" type="password" autocomplete="off" value="${esc(settings.geminiKey)}" placeholder="Paste the key from aistudio.google.com"><label for="gModel">Gemini model</label><input id="gModel" type="text" value="${esc(settings.geminiModel)}"></div>` +
+    opt("claude-api", PROVIDERS["claude-api"].name, PROVIDERS["claude-api"].desc) +
+    `<div class="cfg"><label for="cKey">Claude API key</label><input id="cKey" type="password" autocomplete="off" value="${esc(settings.claudeKey)}"><label for="cModel">Claude model</label><input id="cModel" type="text" value="${esc(settings.claudeModel)}"></div>` +
+    opt("azure", PROVIDERS.azure.name, PROVIDERS.azure.desc) +
+    `<div class="cfg"><label for="aEnd">Endpoint</label><input id="aEnd" type="text" value="${esc(settings.azureEndpoint)}" placeholder="https://your-resource.openai.azure.com"><label for="aDep">Deployment name</label><input id="aDep" type="text" value="${esc(settings.azureDeployment)}"><label for="aKey">Key</label><input id="aKey" type="password" autocomplete="off" value="${esc(settings.azureKey)}"></div>`;
+}
+
+/* ------------------------------------------------------------------ events */
+document.addEventListener("click", async (e) => {
+  const t = e.target.closest("button, [data-close]");
+  if (!t) return;
+  if (t.hasAttribute("data-close")) { t.closest(".modal").hidden = true; return; }
+  if (t.dataset.src) { openSource(t.dataset.src, t.dataset.page, t.dataset.quote); return; }
+  if (t.dataset.pagesel) {
+    if (t.closest("#srcBody")) { openSource(t.dataset.doc, t.dataset.pagesel, ""); return; }
+    srcDocSel = { field: selectedField, doc: t.dataset.doc, page: t.dataset.pagesel, quote: "" }; render(); return;
+  }
+  if (t.dataset.view) { view = t.dataset.view; editingSection = null; render(); window.scrollTo(0, 0); return; }
+  if (t.dataset.case) { currentId = t.dataset.case; currentTab = "memo"; view = "case"; editingSection = null; srcDocSel = null; selectedField = "__auto"; save(); render(); window.scrollTo(0, 0); return; }
+  if (t.dataset.tab) { currentTab = t.dataset.tab; editingSection = null; render(); return; }
+  if (t.dataset.field) { selectedField = t.dataset.field; srcDocSel = null; render(); return; }
+  if (t.dataset.showdoc) { srcDocSel = { field: selectedField, doc: t.dataset.showdoc, page: t.dataset.page, quote: t.dataset.quote }; render(); return; }
+  if (t.dataset.sample) {
+    const s = SAMPLES[t.dataset.sample];
+    const files = s.files.map((f) => new File([f.text != null ? f.text : b64ToBytes(f.b64)], f.name, { type: f.type }));
+    newCaseFromFiles(files, s.label); return;
+  }
+  if (t.dataset.act === "pick") { $("#fileInput").click(); return; }
+  if (t.id === "openSettings" || t.dataset.act === "settings") { renderSettings(); $("#settingsModal").hidden = false; return; }
+  if (t.id === "saveSettings") {
+    settings.provider = (document.querySelector('input[name="prov"]:checked') || {}).value || "auto";
+    settings.geminiKey = $("#gKey").value.trim(); settings.geminiModel = $("#gModel").value.trim() || "gemini-2.5-flash";
+    settings.claudeKey = $("#cKey").value.trim(); settings.claudeModel = $("#cModel").value.trim() || "claude-sonnet-5-5";
+    settings.azureEndpoint = $("#aEnd").value.trim(); settings.azureDeployment = $("#aDep").value.trim(); settings.azureKey = $("#aKey").value.trim();
+    store("nashflow.settings", settings); renderProviderPill(); $("#settingsModal").hidden = true; render(); toast("AI provider saved"); return;
+  }
+  const c = cur(); if (!c) return;
+  const act = t.dataset.act;
+  if (act === "rerun") { runAgents(c); }
+  else if (act === "redraft") { runAgents(c, true); }
+  else if (act === "delete-case") {
+    if (t.dataset.confirm !== "1") { t.dataset.confirm = "1"; t.textContent = "Click again to delete"; return; }
+    cases = cases.filter((x) => x.id !== c.id); currentId = cases[0] ? cases[0].id : null; view = cases.length ? "cases" : "new"; save(); render();
+  }
+  else if (act === "edit-field") {
+    const k = t.dataset.key; const f = c.fields[k];
+    $("#editArea").innerHTML = `<div class="edit-inline" style="width:100%"><input id="fieldEdit" type="text" value="${esc(f.value ?? "")}" aria-label="${esc(FIELD[k].label)}"><button class="btn primary small" type="button" data-act="save-field" data-key="${k}">Save</button><button class="btn small" type="button" data-act="cancel-field">Cancel</button></div>`;
+    $("#fieldEdit").focus();
+  }
+  else if (act === "cancel-field") { render(); }
+  else if (act === "save-field") { editField(c, t.dataset.key, $("#fieldEdit").value); }
+  else if (act === "confirm-field") { confirmField(c, t.dataset.key); }
+  else if (act === "edit-sec") { editingSection = t.dataset.key; render(); const ta = $("#memoEdit"); if (ta) ta.focus(); }
+  else if (act === "cancel-sec") { editingSection = null; render(); }
+  else if (act === "save-sec") {
+    const k = t.dataset.key; const before = (c.memo[k] || {}).text || ""; const after = $("#memoEdit").value;
+    if (after !== before) { c.memo[k] = { text: after, by: "You", at: nowISO() }; audit(c, "You", `Edited memo section "${MEMO_SECTIONS.find((x) => x[0] === k)[1]}". Before: "${before.slice(0, 160)}${before.length > 160 ? "..." : ""}" After: "${after.slice(0, 160)}${after.length > 160 ? "..." : ""}"`); }
+    editingSection = null; save(); render();
+  }
+  else if (act === "copy-memo") {
+    const txt = `CREDIT MEMO: ${c.title} (${c.ref})\n\n` + MEMO_SECTIONS.map(([k, n]) => `${n.toUpperCase()}\n${(c.memo[k] || {}).text || ""}`).join("\n\n");
+    copyText(txt, "Memo copied");
+  }
+  else if (act === "copy-req") { c.brokerRequest = $("#brokerReq").value; save(); copyText(c.brokerRequest, "Email copied"); }
+  else if (act === "log-req") { c.brokerRequest = $("#brokerReq").value; c.status = "More information requested"; audit(c, "You", "Marked the request to the broker as sent"); save(); render(); toast("Status: More information requested"); }
+  else if (act === "use-conds") { $("#decConditions").value = c.memo.conditions.text; draftDecision.conditions = c.memo.conditions.text; }
+  else if (act === "record") {
+    readDecisionForm();
+    const dd = draftDecision;
+    if (!dd.choice) { $("#decMsg").textContent = "Choose a decision."; return; }
+    if (!dd.rationale.trim()) { $("#decMsg").textContent = "Add your rationale. It is required."; return; }
+    if (dd.choice === "Approve" && !dd.grade) { $("#decMsg").textContent = "Choose a risk grade before approving."; return; }
+    const map = { "Approve": "approve", "Decline": "decline", "Request more information": "more", "Escalate to Credit Committee": "escalate" };
+    c.decision = Object.assign({}, dd, { at: nowISO(), override: map[dd.choice] !== c.rec.kind });
+    c.status = { "Approve": "Approved, pricing in progress", "Decline": "Declined", "Request more information": "More information requested", "Escalate to Credit Committee": "With Credit Committee" }[dd.choice];
+    audit(c, "You", `Recorded decision as ${dd.role}: ${dd.choice}${dd.grade ? ", risk grade " + dd.grade : ""}${c.decision.override ? " (differs from suggestion " + c.rec.label + ")" : ""}. Rationale: ${dd.rationale}`);
+    draftDecision = { role: dd.role === "Underwriter" && dd.choice.startsWith("Escalate") ? "Credit Committee" : dd.role, choice: "", grade: "", rationale: "", conditions: "" };
+    save(); render();
+  }
+  else if (act === "reopen") { audit(c, "You", `Reopened the decision (${c.decision.choice})`); c.decision = null; c.status = "In credit review"; save(); render(); }
+});
+document.addEventListener("change", (e) => {
+  if (e.target.id === "decRole" || e.target.name === "decChoice") { readDecisionForm(); render(); }
+});
+function readDecisionForm() {
+  const g = (id) => { const el = document.getElementById(id); return el ? el.value : ""; };
+  draftDecision.role = g("decRole") || draftDecision.role;
+  const ch = document.querySelector('input[name="decChoice"]:checked'); draftDecision.choice = ch ? ch.value : "";
+  draftDecision.grade = g("decGrade"); draftDecision.rationale = g("decRationale"); draftDecision.conditions = g("decConditions");
+}
+function copyText(txt, msg) {
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(() => toast(msg), () => fallbackCopy(txt, msg)); else fallbackCopy(txt, msg);
+}
+function fallbackCopy(txt, msg) { const ta = document.createElement("textarea"); ta.value = txt; document.body.append(ta); ta.select(); try { document.execCommand("copy"); toast(msg); } catch (e) { toast("Select the text and copy it yourself"); } ta.remove(); }
+$("#fileInput").addEventListener("change", (e) => { const files = [...e.target.files]; e.target.value = ""; if (files.length) newCaseFromFiles(files); });
+["dragenter", "dragover"].forEach((ev) => document.addEventListener(ev, (e) => { const d = e.target.closest && e.target.closest("#drop"); if (d) { e.preventDefault(); d.classList.add("over"); } }));
+["dragleave", "drop"].forEach((ev) => document.addEventListener(ev, (e) => { const d = e.target.closest && e.target.closest("#drop"); if (d) { e.preventDefault(); d.classList.remove("over"); } }));
+document.addEventListener("drop", (e) => { const d = e.target.closest && e.target.closest("#drop"); if (d) { const files = [...e.dataTransfer.files]; if (files.length) newCaseFromFiles(files); } });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") document.querySelectorAll(".modal").forEach((m) => (m.hidden = true)); });
+document.querySelectorAll(".modal").forEach((m) => m.addEventListener("click", (e) => { if (e.target === m) m.hidden = true; }));
+
+/* interrupted runs from a previous visit */
+cases.forEach((c) => { if (c.run && c.run.running) { c.run.running = false; c.run.error = "The page was closed while the agents were working."; const s = c.run.steps.find((x) => x.state === "active"); if (s) s.state = "error"; } });
+renderProviderPill(); render();
+</script>
+
+</body>
+</html>

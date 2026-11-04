@@ -1,0 +1,22 @@
+From: Tom Ridley <tom.ridley@pennineloans.example>
+To: deals@lender.example
+Date: Tue, 3 Nov 2026 16:42
+Subject: Purchase - Stourton Trade Park, Leeds - 2.4m
+
+Afternoon,
+
+Quick one for you to look at. My client Calder Works Investments Ltd is buying Units 3 to 5, Stourton Trade Park, Leeds LS10 1XY.
+It's an SPV, set up last year. Director is Mark Calder.
+
+Purchase price agreed at £3,350,000. We think it's worth around £3.5m, no valuation yet.
+Looking for £2.4m over 10 years.
+
+Both units are let. I'll send the rent roll and leases next week.
+
+Accounts for Mark's other company attached so you can see the background.
+
+Cheers,
+Tom
+Pennine Loans
+
+Fictional sample prepared for the NashFlow prototype. Any resemblance to real companies or people is coincidental.

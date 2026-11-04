@@ -1,0 +1,32 @@
+From: Amy Fenwick <amy@fenwickcf.example>
+To: deals@lender.example
+Date: Mon, 2 Nov 2026 09:14
+Subject: New enquiry - Thamesgate Property Holdings Ltd - Kennet House, Reading - £850k refinance
+
+Hi team,
+
+Please find attached a refinance enquiry for an existing client of ours.
+
+Borrower: Thamesgate Property Holdings Ltd (company number 13874521)
+Registered office: 14 Kings Road, Reading RG1 3AR
+Directors: Daniel Okafor and Priya Raman, both happy to give personal guarantees.
+
+Property: Kennet House, 41 Abbey Walk, Reading RG1 3BH. Freehold multi-let office building, four floors, fully let to four tenants.
+The borrower bought the building in 2019 and already owns it.
+
+Loan requested: £850,000 to refinance the existing facility with another lender.
+Term: 5 years, interest only.
+Proposed pay rate: 7.25% fixed.
+
+Valuation: Harcourt Lane Chartered Surveyors valued the property at £1,420,000 on 15 September 2026 (report attached).
+Rent: passing rent is £118,500 per annum per the attached tenancy schedule.
+EPC: C.
+
+The directors have run a portfolio of six commercial investment properties in the Thames Valley since 2014, with no arrears and no adverse credit.
+Latest accounts to 31 March 2026 are attached.
+
+Kind regards,
+Amy Fenwick
+Director, Fenwick Commercial Finance
+
+Fictional sample prepared for the NashFlow prototype. Any resemblance to real companies or people is coincidental.
