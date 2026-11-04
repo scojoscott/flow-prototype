@@ -203,6 +203,47 @@ const conditions = { conditions: [
   console.log("Second status:", await page.locator(".casecard .chip.c-amber").first().innerText());
   await page.click('button[data-view="cases"]');
   await page.screenshot({ path: OUT + "/6b-cases-uw.png" });
+  // deals inbox: mocked Google Apps Script web app
+  const fs = require("fs");
+  const pdfB64 = fs.readFileSync(path.join(__dirname, "samples/inconsistent/Tenancy schedule - Hulme Parade.pdf")).toString("base64");
+  const gas = { calls: [], round: 0 };
+  await ctx.route(/script\.google\.com\/macros/, async (route) => {
+    const req = route.request(); const u = new URL(req.url());
+    const p = req.method() === "POST" ? JSON.parse(req.postData() || "{}") : Object.fromEntries(u.searchParams);
+    gas.calls.push(p.action);
+    let body = { ok: true };
+    if (p.key !== "demo-key") body = { error: "The key does not match the one in the script." };
+    else if (p.action === "ping") body = { ok: true, inbox: "nashflow.deals.demo@gmail.com" };
+    else if (p.action === "list") {
+      gas.round++;
+      body = { ok: true, messages: gas.round === 1 ? [{ id: "m1", threadId: "t1", from: "Ravi Sandhu <ravi@sandhufinance.example>", to: "nashflow.deals.demo@gmail.com", subject: "Refinance request - Redmere Estates Ltd - Hulme Parade", date: "2026-11-05T08:05:00Z", body: "Borrower: Redmere Estates Ltd. Loan: £1,600,000, term 7 years.", attachments: [{ name: "Tenancy schedule - Hulme Parade.pdf", type: "application/pdf", b64: pdfB64 }] }]
+        : gas.round === 3 ? [{ id: "m2", threadId: "t1", from: "Ravi Sandhu <ravi@sandhufinance.example>", subject: "Re: Refinance request", date: "2026-11-05T10:00:00Z", body: "Unit 6 lease attached.", attachments: [{ name: "Unit 6 lease.pdf", type: "application/pdf", b64: pdfB64 }] }] : [] };
+    }
+    else if (p.action === "send") body = p.threadId === "t1" && p.body ? { ok: true } : { error: "bad send" };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  });
+  await page.click('.rolebox button[data-role="Relationship Manager"]');
+  await page.click('button[data-view="inbox"]');
+  await page.fill("#ibUrl", "https://script.google.com/macros/s/TEST/exec");
+  await page.fill("#ibKey", "demo-key");
+  await page.check("#ibChase");
+  await page.click('button[data-act="inbox-test"]');
+  await page.waitForTimeout(300);
+  await page.click('button[data-act="inbox-check"]');
+  await page.waitForFunction(() => cases.some((c) => c.source && c.memo && c.chase && c.chase.sent.length), null, { timeout: 20000 });
+  console.log("Inbox case:", await page.evaluate(() => { const c = cases.find((x) => x.source); return [c.ref, c.title, c.docs.length + " docs", c.chase.sent.length + " sent", c.status].join(" | "); }));
+  await page.screenshot({ path: OUT + "/8-inbox.png", fullPage: true });
+  await page.click('button[data-act="inbox-check"]');
+  await page.waitForTimeout(800);
+  await page.click('button[data-act="inbox-check"]');
+  await page.waitForTimeout(1000);
+  await page.waitForFunction(() => { const c = cases.find((x) => x.source); return c.docs.length === 4 && c.memo && !c.run.running; }, null, { timeout: 20000 });
+  console.log("After reply:", await page.evaluate(() => { const c = cases.find((x) => x.source); return [c.docs.length + " docs", (c.chase.replies || []).length + " replies", c.chase.sent.length + " sent"].join(" | "); }));
+  await page.evaluate(() => { const c = cases.find((x) => x.source); currentId = c.id; view = "case"; currentTab = "memo"; render(); });
+  await page.click('button[data-act="chase-remind"]');
+  await page.click('button[data-act="chase-remind"]');
+  console.log("Flag RM:", await page.evaluate(() => cases.find((x) => x.source).chase.flagRM), "GAS calls:", gas.calls.join(","));
+  await page.screenshot({ path: OUT + "/9-chase.png", fullPage: true });
   // mobile
   const m = await browser.newPage({ viewport: { width: 400, height: 860 } });
   await m.addInitScript(() => { window.__testAI = async () => { throw new Error("x"); }; });

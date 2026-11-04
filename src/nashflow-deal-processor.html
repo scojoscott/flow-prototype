@@ -687,8 +687,9 @@ function stageOf(c) { return c.stage || (c.decision ? (c.decision.choice === "De
 function waitingOn(c) { const s = stageOf(c); return s === "uw" ? "Underwriter" : s === "rm" || s === "returned" ? "Relationship Manager" : null; }
 function audit(c, who, what, kind = "human") { c.audit.push({ at: nowISO(), who, what, kind }); }
 
-async function newCaseFromFiles(files, title) {
+async function newCaseFromFiles(files, title, extra) {
   const c = { id: uid(), ref: nextRef(), createdAt: nowISO(), title: title || "New case", status: "New (being read by agents)", docs: [], audit: [], run: null, fields: null, tenants: [], checks: [], consistency: [], judgements: [], memo: null, rec: null, decision: null };
+  if (extra) Object.assign(c, extra);
   cases.unshift(c); currentId = c.id; currentTab = "memo"; view = "case"; srcDocSel = null; selectedField = "__auto";
   memImages[c.id] = [];
   render();
@@ -710,6 +711,26 @@ async function newCaseFromFiles(files, title) {
   }
   save(); render();
   runAgents(c);
+  return c;
+}
+/* Add documents to an existing case (for example a broker's reply) and run the agents again */
+async function addFilesToCase(c, files, who) {
+  memImages[c.id] = memImages[c.id] || [];
+  let i = c.docs.length;
+  for (const f of files) {
+    i++;
+    try {
+      const d = await readFile(f);
+      d.id = "D" + i;
+      if (d.kind === "pdf") await fileStore.put(c.id + "/" + d.id, { name: f.name, bytes: await f.arrayBuffer() });
+      d.images.forEach((im) => memImages[c.id].push(Object.assign({ doc: d.id }, im)));
+      d.imagePages = d.images.map((im) => im.page); delete d.images;
+      c.docs.push(d);
+      audit(c, who || "Intake agent", `Read ${d.id} "${d.name}" (${d.pages.length} page${d.pages.length > 1 ? "s" : ""})`, "agent");
+    } catch (e) { audit(c, who || "Intake agent", `Could not read "${f.name}": ${e.message}`, "agent"); }
+  }
+  save(); render();
+  return runAgents(c);
 }
 
 /* ------------------------------------------------------------------ prompts */
@@ -1246,6 +1267,7 @@ async function runAgents(c, onlyMemo = false) {
   }
   c.run.running = false;
   save(); render();
+  if (typeof afterRun === "function") { try { await afterRun(c); } catch (e) { /* inbox follow-up is best effort */ } }
 }
 
 /* ------------------------------------------------------------------ human actions */
@@ -1313,7 +1335,7 @@ function renderNav() {
   $("#roleBox").innerHTML = `<div class="k">Working as</div><div class="roleseg">${ROLES.map((r) => `<button type="button" data-role="${esc(r)}" aria-pressed="${currentRole === r}">${r === "Relationship Manager" ? "Relationship Manager" : r}</button>`).join("")}</div><small>${currentRole === "Underwriter" ? "Reviews, sets conditions and decides." : "Checks the agents' work, prepares the case and submits it."}</small>`;
   const mine = cases.filter((x) => waitingOn(x) === currentRole && x.memo).length;
   $("#navCases").innerHTML = `<div class="navlabel">Cases</div>${item("new", "New case")}${item("cases", "My cases", mine || cases.length)}${item("case", "Case management", null, !c)}`;
-  $("#navAdmin").innerHTML = `<div class="navlabel">Administration</div>${item("policy", "Credit policies")}${item("agents", "AI governance")}`;
+  $("#navAdmin").innerHTML = `<div class="navlabel">Administration</div>${item("inbox", "Deals inbox")}${item("policy", "Credit policies")}${item("agents", "AI governance")}`;
 }
 
 function renderNew() {
@@ -1335,7 +1357,7 @@ function caseRow(c) {
   const consistent = !c.fields ? "" : mism ? `<span class="chip c-amber">${mism} mismatch</span>` : `<span class="chip c-green">Consistent</span>`;
   const rec = c.rec && c.memo ? `<span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label.split(" (")[0])}</span>` : c.run && c.run.error ? `<span class="chip c-red">Run stopped</span>` : `<span class="chip c-grey">Pending</span>`;
   return `<tr><td class="num">${dateOf(c.createdAt)} ${timeOf(c.createdAt)}<span class="sub">uploaded</span></td>
-    <td><b>${esc(c.title)}</b><span class="sub">${esc(c.ref)}${c.fields && usable(c, "broker") ? " · " + esc(usable(c, "broker")) : ""}</span></td>
+    <td><b>${esc(c.title)}</b>${c.source && c.source.kind === "email" ? ` <span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? ` <span class="chip c-red">Broker not replying</span>` : ""}<span class="sub">${esc(c.ref)}${c.fields && usable(c, "broker") ? " · " + esc(usable(c, "broker")) : ""}</span></td>
     <td class="fv">${shortMoney(L)}</td><td>${complete}</td><td>${consistent}</td><td>${esc(STAGES[stageOf(c)])}${c.memo && waitingOn(c) === currentRole ? ` <span class="chip c-red">Your action</span>` : c.memo && waitingOn(c) ? `<span class="sub">Waiting on ${esc(waitingOn(c))}</span>` : ""}</td><td>${rec}</td>
     <td><button class="btn primary small" type="button" data-case="${c.id}">Open case</button></td></tr>`;
 }
@@ -1374,7 +1396,7 @@ function renderCaseView(c) {
   else body = { memo: renderMemoTab, source: renderSource, fin: renderFinancials, policy: renderPolicyTab, decision: renderDecision, audit: renderAudit }[currentTab](c);
   return pageHead("Case management", "Case management") + `
   <div class="casecard">
-    <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${c.memo && waitingOn(c) === currentRole ? `<span class="chip c-red">Your action</span>` : ""}<span style="flex:1"></span><button class="btn small" type="button" data-act="delete-case">Delete case</button></div>
+    <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${c.memo && waitingOn(c) === currentRole ? `<span class="chip c-red">Your action</span>` : ""}${c.source && c.source.kind === "email" ? `<span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? `<span class="chip c-red">Broker not replying</span>` : ""}<span style="flex:1"></span><button class="btn small" type="button" data-act="delete-case">Delete case</button></div>
     <div class="subline">${esc(sub)}</div>
     <div class="tiles">
       ${tile("Facility", shortMoney(L), T != null ? `${T} years${rb ? ", " + esc(rb) : ""}` : "")}
@@ -1417,7 +1439,7 @@ function renderMemoTab(c) {
       const body = editingSection === k ? `<textarea class="ed" id="memoEdit" aria-label="${esc(name)}">${esc(s.text)}</textarea><div class="row"><button class="btn primary small" type="button" data-act="save-sec" data-key="${k}">Save</button><button class="btn small" type="button" data-act="cancel-sec">Cancel</button></div>` : `<div class="memo-body">${renderRich(s.text) || '<p class="note">Empty</p>'}</div>`;
       return `<section class="memo-sec"><header><h3>${esc(name)}</h3><span class="by">${by}</span><span class="grow"></span>${editingSection === k ? "" : `${cm.length ? `<span class="chip c-blue">${cm.length} comment${cm.length > 1 ? "s" : ""}</span>` : ""}<button class="btn small" type="button" data-act="comment" data-key="${k}">Comment</button><button class="btn small" type="button" data-act="edit-sec" data-key="${k}">Edit</button>`}</header>${body}${cmHtml}</section>`;
     }).join("")}</div>`;
-  const req = c.brokerRequest ? `<div class="card"><div class="cardhead"><h2>Request to the broker</h2><span class="chip c-amber">Drafted</span></div><p class="hint">Drafted by the memo agent. Edit it, then copy it into your email. Nothing is sent from here.</p><textarea class="ed" id="brokerReq" aria-label="Request to the broker">${esc(c.brokerRequest)}</textarea><div class="row"><button class="btn" type="button" data-act="copy-req">Copy email</button><button class="btn" type="button" data-act="log-req">Mark as sent</button></div></div>` : "";
+  const req = c.source && c.source.kind === "email" ? chaseCard(c) : c.brokerRequest ? `<div class="card"><div class="cardhead"><h2>Request to the broker</h2><span class="chip c-amber">Drafted</span></div><p class="hint">Drafted by the memo agent. Edit it, then copy it into your email. Nothing is sent from here.</p><textarea class="ed" id="brokerReq" aria-label="Request to the broker">${esc(c.brokerRequest)}</textarea><div class="row"><button class="btn" type="button" data-act="copy-req">Copy email</button><button class="btn" type="button" data-act="log-req">Mark as sent</button></div></div>` : "";
   return `<div class="grid2"><div class="stack">${recbar}${stale}${memo}</div><div class="stack">${renderAgents(c)}${req}${renderDocs(c)}</div></div>`;
 }
 
@@ -1685,7 +1707,7 @@ function renderPolicyAdmin() {
 function renderAgentsAdmin() {
   const p = activeProvider();
   const agents = [
-    ["Intake agent", "Reads each uploaded document: PDF text, Word, Excel, emails and scanned images.", "In the browser"],
+    ["Intake agent", "Reads the deals inbox and opens a case for each new broker email, adds broker replies to their case, emails the broker for missing information and sends reminders. Reads each document: PDF text, Word, Excel, emails and scanned images.", "In the browser, with a Google Apps Script for the demo inbox"],
     ["Extraction agent", "Classifies each document and extracts the application fields with the document, page and exact text, using four states.", PROVIDERS[p].name],
     ["Policy agent", "Calculates loan size, term, LTV, ICR, DSCR, location, EPC, WAULT, concentration and document age, and suggests a recommendation.", "Code, no AI"],
     ["Financial analysis agent", "Spreads up to three years of accounts and the guarantors' statements of assets and liabilities, with sources. Ratios are then calculated in code.", PROVIDERS[p].name],
@@ -1700,7 +1722,7 @@ function render() {
   renderNav();
   const c = cur();
   if (view === "case" && !c) view = cases.length ? "cases" : "new";
-  const html = { new: renderNew, cases: renderCases, policy: renderPolicyAdmin, agents: renderAgentsAdmin }[view];
+  const html = { new: renderNew, cases: renderCases, inbox: renderInbox, policy: renderPolicyAdmin, agents: renderAgentsAdmin }[view];
   $("#main").innerHTML = view === "case" ? renderCaseView(c) : html();
   hydratePages($("#main"));
 }
@@ -1735,6 +1757,136 @@ function renderSettings() {
     `<div class="cfg"><label for="aEnd">Endpoint</label><input id="aEnd" type="text" value="${esc(settings.azureEndpoint)}" placeholder="https://your-resource.openai.azure.com"><label for="aDep">Deployment name</label><input id="aDep" type="text" value="${esc(settings.azureDeployment)}"><label for="aKey">Key</label><input id="aKey" type="password" autocomplete="off" value="${esc(settings.azureKey)}"></div>`;
 }
 
+/* ------------------------------------------------------------------ deals inbox (Gmail demo inbox via Google Apps Script) */
+const INBOX_SCRIPT = "/*\n * NashFlow demo inbox: Google Apps Script for a Gmail account used only for demos.\n * Use made-up or anonymised deal packs only. Whatever reaches this inbox passes through Google.\n *\n * What it does\n *   list  : returns new emails in the inbox (last 14 days) with their attachments\n *   done  : marks an email as picked up so it is not returned again\n *   send  : replies to the broker in the same email thread (or sends a new email)\n *   ping  : checks the connection\n *\n * Set up (about 10 minutes)\n *   1. Sign in to the demo Gmail account and open https://script.google.com. Click New project.\n *   2. Delete what is there, paste this whole file in and click Save.\n *   3. Change KEY below to a long random phrase. You will paste the same phrase into NashFlow.\n *   4. Click Deploy, then New deployment. Choose type \"Web app\".\n *      Execute as: Me. Who has access: Anyone. Click Deploy and allow the permissions it asks for.\n *   5. Copy the Web app URL (it ends in /exec) and paste it into NashFlow under Administration, Deals inbox.\n *   If you change this code later, use Deploy, Manage deployments, edit, Version: New version, so the URL stays the same.\n */\nconst KEY = \"CHANGE-ME-to-a-long-random-phrase\";\nconst LABEL = \"NashFlow picked up\";\nconst MAX_ATTACHMENT_BYTES = 8 * 1024 * 1024;\n\nfunction doGet(e) { return handle_(e && e.parameter ? e.parameter : {}); }\nfunction doPost(e) {\n  let p = {};\n  try { p = JSON.parse(e.postData.contents); } catch (x) { p = {}; }\n  return handle_(p);\n}\nfunction out_(o) { return ContentService.createTextOutput(JSON.stringify(o)).setMimeType(ContentService.MimeType.JSON); }\n\nfunction handle_(p) {\n  if (!p.key || p.key !== KEY) return out_({ error: \"The key does not match the one in the script.\" });\n  try {\n    if (p.action === \"ping\") return out_({ ok: true, inbox: Session.getEffectiveUser().getEmail() });\n    if (p.action === \"list\") return out_({ ok: true, messages: listNew_() });\n    if (p.action === \"done\") { markDone_(p.id); return out_({ ok: true }); }\n    if (p.action === \"send\") return out_(send_(p));\n    return out_({ error: \"Unknown action.\" });\n  } catch (err) {\n    return out_({ error: String(err && err.message ? err.message : err) });\n  }\n}\n\nfunction listNew_() {\n  const me = Session.getEffectiveUser().getEmail().toLowerCase();\n  const props = PropertiesService.getScriptProperties();\n  const threads = GmailApp.search(\"in:inbox newer_than:14d\", 0, 15);\n  const found = [];\n  threads.forEach(function (t) {\n    t.getMessages().forEach(function (m) {\n      if (found.length >= 3) return;\n      if (props.getProperty(\"done:\" + m.getId())) return;\n      if (m.getFrom().toLowerCase().indexOf(me) >= 0) return; // our own replies\n      const atts = m.getAttachments({ includeInlineImages: false, includeAttachments: true })\n        .filter(function (a) { return a.getSize() <= MAX_ATTACHMENT_BYTES; })\n        .map(function (a) { return { name: a.getName(), type: a.getContentType(), b64: Utilities.base64Encode(a.getBytes()) }; });\n      found.push({ id: m.getId(), threadId: t.getId(), from: m.getFrom(), to: m.getTo(), subject: m.getSubject(),\n        date: m.getDate().toISOString(), body: m.getPlainBody().slice(0, 60000), attachments: atts });\n    });\n  });\n  return found;\n}\n\nfunction markDone_(id) {\n  if (!id) return;\n  PropertiesService.getScriptProperties().setProperty(\"done:\" + id, new Date().toISOString());\n  const m = GmailApp.getMessageById(id);\n  if (m) {\n    const label = GmailApp.getUserLabelByName(LABEL) || GmailApp.createLabel(LABEL);\n    m.getThread().addLabel(label);\n    m.markRead();\n  }\n}\n\nfunction send_(p) {\n  if (!p.body) return { error: \"Nothing to send.\" };\n  if (p.threadId) {\n    const t = GmailApp.getThreadById(p.threadId);\n    if (!t) return { error: \"Email thread not found.\" };\n    const me = Session.getEffectiveUser().getEmail().toLowerCase();\n    const msgs = t.getMessages().filter(function (m) { return m.getFrom().toLowerCase().indexOf(me) < 0; });\n    if (!msgs.length) return { error: \"No message from the broker in this thread.\" };\n    msgs[msgs.length - 1].reply(p.body);\n    return { ok: true };\n  }\n  if (!p.to) return { error: \"No address to send to.\" };\n  GmailApp.sendEmail(p.to, p.subject || \"Your application\", p.body);\n  return { ok: true };\n}\n";
+let inboxBusy = false;
+let inboxState = Object.assign({ last: null, error: "", log: [] }, load("nashflow.inbox.state", {}));
+const inboxSeen = new Set(load("nashflow.inbox.seen", []));
+function inboxLog(text) { inboxState.log.unshift({ at: nowISO(), text }); inboxState.log = inboxState.log.slice(0, 30); store("nashflow.inbox.state", inboxState); }
+function addWorkingDays(iso, n) { const d = new Date(iso); let k = 0; while (k < n) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) k++; } return d; }
+async function inboxCall(action, params = {}) {
+  if (!settings.inboxUrl || !settings.inboxKey) throw new Error("Add the inbox web app address and key first.");
+  let res;
+  try {
+    if (action === "send") res = await fetch(settings.inboxUrl, { method: "POST", body: JSON.stringify(Object.assign({ key: settings.inboxKey, action }, params)) });
+    else res = await fetch(settings.inboxUrl + "?" + new URLSearchParams(Object.assign({ key: settings.inboxKey, action }, params)).toString());
+  } catch (e) { throw new Error("Could not reach the inbox. It works on the hosted page or the downloaded copy, not inside the claude.ai link. Check the web app address and that it is deployed for Anyone."); }
+  const d = await res.json().catch(() => { throw new Error("The inbox did not reply with data. Check the web app address ends in /exec and the deployment allows Anyone."); });
+  if (d.error) throw new Error("The inbox said: " + d.error);
+  return d;
+}
+function emailFile(m) {
+  const head = `From: ${m.from}\nTo: ${m.to || ""}\nDate: ${m.date}\nSubject: ${m.subject}\n\n`;
+  return new File([head + (m.body || "")], "Broker email" + (m.subject ? " - " + m.subject.replace(/[\\/:*?"<>|]/g, " ").slice(0, 60) : "") + ".txt", { type: "text/plain" });
+}
+const brokerName = (from) => { const n = String(from || "").replace(/<.*>/, "").replace(/"/g, "").trim(); return n || String(from || ""); };
+async function pollInbox(manual) {
+  if (!settings.inboxUrl || !settings.inboxKey) { if (manual) toast("Add the inbox address and key first"); return; }
+  if (inboxBusy) return;
+  inboxBusy = true;
+  try {
+    const r = await inboxCall("list");
+    for (const m of r.messages || []) {
+      if (inboxSeen.has(m.id)) { await inboxCall("done", { id: m.id }).catch(() => {}); continue; }
+      const files = [emailFile(m)].concat((m.attachments || []).map((a) => new File([b64ToBytes(a.b64)], a.name, { type: a.type || "application/octet-stream" })));
+      const existing = cases.find((x) => x.source && x.source.threadId === m.threadId);
+      inboxSeen.add(m.id); store("nashflow.inbox.seen", [...inboxSeen]);
+      await inboxCall("done", { id: m.id }).catch(() => {});
+      if (existing) {
+        existing.chase = existing.chase || { sent: [], replies: [] };
+        existing.chase.awaiting = false; existing.chase.flagRM = false; existing.chase.replies.push(nowISO()); existing.chase.sinceReply = 0;
+        audit(existing, "Intake agent", `The broker replied by email with ${m.attachments.length} attachment${m.attachments.length === 1 ? "" : "s"}. Added to the case and running the agents again.`, "agent");
+        inboxLog(`Reply from ${brokerName(m.from)} added to ${existing.ref} ${existing.title}`);
+        toast(`Broker replied on ${existing.ref}. The agents are updating the case.`);
+        addFilesToCase(existing, files);
+      } else {
+        const prev = { id: currentId, view, tab: currentTab };
+        const c = await newCaseFromFiles(files, m.subject || "Email from " + brokerName(m.from), { source: { kind: "email", id: m.id, threadId: m.threadId, from: m.from, subject: m.subject, at: m.date } });
+        audit(c, "Intake agent", `Picked up an email from ${brokerName(m.from)}: "${m.subject}" with ${m.attachments.length} attachment${m.attachments.length === 1 ? "" : "s"}. Case opened automatically.`, "agent");
+        inboxLog(`New case ${c.ref} from ${brokerName(m.from)}: ${m.subject}`);
+        if (prev.view === "case" && prev.id) { currentId = prev.id; view = "case"; currentTab = prev.tab; } else view = prev.view === "new" ? "cases" : prev.view;
+        save(); render(); toast(`New case from ${brokerName(m.from)}. The agents are reading it.`);
+      }
+    }
+    await chaseReminders();
+    inboxState.last = nowISO(); inboxState.error = "";
+    if (manual) toast((r.messages || []).length ? `Picked up ${r.messages.length} email${r.messages.length > 1 ? "s" : ""}` : "No new emails");
+  } catch (e) {
+    inboxState.error = e.message || String(e);
+    if (manual) toast(inboxState.error);
+  } finally {
+    inboxBusy = false; store("nashflow.inbox.state", inboxState);
+    const el = document.getElementById("inboxStatus"); if (el) el.innerHTML = inboxStatusHtml();
+  }
+}
+async function sendToBroker(c, kind) {
+  const body = (kind === "Reminder" ? "Just a reminder about the items below, which we need before we can take this further.\n\n" : "") +
+    String(c.brokerRequest || "").replace(/\[Your name\]/g, "The lending team, Demo lender\n(Sent by NashFlow)");
+  await inboxCall("send", { threadId: c.source.threadId, body });
+  c.chase = c.chase || { sent: [], replies: [] };
+  c.chase.sent.push({ at: nowISO(), kind, body }); c.chase.awaiting = true; c.chase.sinceReply = (c.chase.sinceReply || 0) + 1;
+  audit(c, "Intake agent", `${kind === "Reminder" ? "Sent a reminder" : "Emailed the broker"} asking for the missing information`, "agent");
+  inboxLog(`${kind} sent to ${brokerName(c.source.from)} for ${c.ref}`);
+  c.status = "Waiting on broker"; save();
+}
+async function chaseReminders() {
+  if (!settings.chaseAuto) return;
+  for (const c of cases) {
+    const ch = c.chase; if (!ch || !ch.awaiting || !c.source) continue;
+    const last = ch.sent[ch.sent.length - 1]; if (!last || new Date() < addWorkingDays(last.at, 2)) continue;
+    if ((ch.sinceReply || 0) < 2) await sendToBroker(c, "Reminder").catch((e) => audit(c, "System", "Reminder not sent: " + e.message, "agent"));
+    else if (!ch.flagRM) { ch.flagRM = true; audit(c, "Intake agent", "No reply from the broker after 2 emails. Flagged to the RM.", "agent"); inboxLog(`${c.ref}: no reply after 2 emails, flagged to the RM`); save(); }
+  }
+  render();
+}
+async function afterRun(c) {
+  if (!c.source || c.source.kind !== "email" || !c.memo) return;
+  c.chase = c.chase || { sent: [], replies: [] };
+  if (!c.brokerRequest) { if (c.chase.awaiting) { c.chase.awaiting = false; save(); } return; }
+  if (!settings.chaseAuto || c.chase.awaiting) return;
+  try { await sendToBroker(c, "Request"); toast(`Emailed ${brokerName(c.source.from)} for the missing information on ${c.ref}`); }
+  catch (e) { audit(c, "System", "Could not email the broker: " + e.message, "agent"); }
+  save(); render();
+}
+function chaseCard(c) {
+  const ch = c.chase || { sent: [], replies: [] };
+  const hist = ch.sent.map((x) => ({ at: x.at, t: `${x.kind} sent to ${brokerName(c.source.from)}` })).concat((ch.replies || []).map((at) => ({ at, t: "Broker replied" }))).sort((a, b) => (a.at < b.at ? -1 : a.at > b.at ? 1 : 0)).map((x) => `<li><span class="note">${dateOf(x.at)} ${timeOf(x.at)}</span> ${esc(x.t)}</li>`).join("");
+  const next = ch.awaiting && ch.sent.length ? addWorkingDays(ch.sent[ch.sent.length - 1].at, 2) : null;
+  return `<div class="card"><div class="cardhead"><h2>Emails with the broker</h2>${ch.flagRM ? `<span class="chip c-red">Not replying</span>` : ch.awaiting ? `<span class="chip c-amber">Waiting on broker</span>` : c.brokerRequest ? `<span class="chip c-grey">Not sent</span>` : `<span class="chip c-green">Nothing missing</span>`}</div>
+    <p class="hint">This case came in by email from ${esc(brokerName(c.source.from))}: "${esc(c.source.subject || "")}". ${settings.chaseAuto ? "NashFlow emails the broker for anything missing, reminds after 2 working days, and flags the RM after 2 unanswered emails." : "Automatic follow-up is off in Deals inbox."}</p>
+    ${ch.flagRM ? `<div class="errbox"><b>No reply after 2 emails.</b> Call the broker or decide whether to carry on.</div>` : ""}
+    ${hist ? `<ul class="handoffs">${hist}</ul>` : ""}
+    ${next && !ch.flagRM ? `<p class="note">Next reminder from ${dateOf(next.toISOString())} if there is no reply.</p>` : ""}
+    ${c.brokerRequest ? `<details><summary class="note">What NashFlow asks for</summary><div class="memo-body">${renderRich(c.brokerRequest)}</div></details>` : ""}
+    <div class="row">${c.brokerRequest && !ch.awaiting ? `<button class="btn small" type="button" data-act="chase-send">Send to the broker now</button>` : ""}${ch.awaiting && !ch.flagRM ? `<button class="btn small" type="button" data-act="chase-remind">${(ch.sinceReply || 0) >= 2 ? "Skip ahead: still no reply (demo)" : "Skip ahead: send the reminder now (demo)"}</button>` : ""}</div></div>`;
+}
+function inboxStatusHtml() {
+  const on = settings.inboxUrl && settings.inboxKey;
+  return `${!on ? `<span class="chip c-grey">Not connected</span>` : inboxState.error ? `<span class="chip c-red">Problem</span>` : settings.inboxAuto ? `<span class="chip c-green">Checking every 30 seconds</span>` : `<span class="chip c-amber">Connected, checking only when you click</span>`}
+    ${inboxState.last ? `<span class="note">Last checked ${dateOf(inboxState.last)} ${timeOf(inboxState.last)}</span>` : ""}${inboxState.error ? `<div class="errbox">${esc(inboxState.error)}</div>` : ""}`;
+}
+function renderInbox() {
+  const ck = (id, on, label, desc) => `<label class="choice"><input type="checkbox" id="${id}" ${on ? "checked" : ""}><span><b>${label}</b><small>${desc}</small></span></label>`;
+  return pageHead("Deals inbox", "Deals inbox", "NashFlow reads a deals inbox. When a broker emails a deal pack, the intake agent opens a case and runs the agents with no clicks. If anything is missing, NashFlow emails the broker, reminds after 2 working days, and flags the RM after 2 unanswered emails.") +
+    `<div class="proto"><b>Demo inbox.</b> This prototype uses a Gmail account set up for demos, through a small Google Apps Script. Send it made-up or anonymised packs only. It works on the hosted page and the downloaded copy, not inside the claude.ai link.</div>
+    <div class="grid2 even"><div class="stack">
+      <div class="card"><div class="cardhead"><h2>Connection</h2></div><div id="inboxStatus" class="row">${inboxStatusHtml()}</div>
+        <div class="cfg"><label for="ibUrl">Web app address (ends in /exec)</label><input id="ibUrl" type="url" value="${esc(settings.inboxUrl || "")}" placeholder="https://script.google.com/macros/s/.../exec"><label for="ibKey">Key (the same phrase as in the script)</label><input id="ibKey" type="password" autocomplete="off" value="${esc(settings.inboxKey || "")}"></div>
+        ${ck("ibAuto", settings.inboxAuto, "Check for new emails every 30 seconds", "While this page is open.")}
+        ${ck("ibChase", settings.chaseAuto, "Email the broker automatically for missing information", "Sent from the demo inbox as a reply in the broker's thread. Reminder after 2 working days, then the RM is flagged.")}
+        <div class="row"><button class="btn primary" type="button" data-act="inbox-save">Save</button><button class="btn" type="button" data-act="inbox-test">Test the connection</button><button class="btn" type="button" data-act="inbox-check">Check now</button></div></div>
+      <div class="card"><h2>Activity</h2>${inboxState.log.length ? `<ul class="handoffs">${inboxState.log.map((x) => `<li><span class="note">${dateOf(x.at)} ${timeOf(x.at)}</span> ${esc(x.text)}</li>`).join("")}</ul>` : `<p class="hint">Nothing yet.</p>`}</div>
+    </div><div class="stack">
+      <div class="card"><h2>Set up the demo inbox (about 10 minutes)</h2>
+        <ol class="obs"><li>Create a Gmail account just for demos, for example nashflow.deals.demo@gmail.com.</li><li>Signed in as that account, open <b>script.google.com</b> and click <b>New project</b>.</li><li>Delete what is there and paste in the script below. Change <b>KEY</b> near the top to a long random phrase, then click <b>Save</b>.</li><li>Click <b>Deploy</b>, <b>New deployment</b>, type <b>Web app</b>. Execute as <b>Me</b>, who has access <b>Anyone</b>. Click <b>Deploy</b> and allow the permissions.</li><li>Copy the web app address and paste it here with the same key. Click <b>Test the connection</b>, then tick <b>Check every 30 seconds</b>.</li><li>Email a deal pack to the demo address from another account. The case appears in My cases within about a minute.</li></ol>
+        <div class="row"><button class="btn" type="button" data-act="inbox-copy">Copy the script</button></div>
+        <details><summary class="note">Show the script</summary><pre class="pagetext">${esc(INBOX_SCRIPT)}</pre></details>
+        <p class="hint">Anyone with the web app address and key could read the demo inbox, so keep both private and use the account for demos only.</p></div>
+    </div></div>`;
+}
+setInterval(() => { if (settings.inboxAuto && !document.hidden) pollInbox(false); }, 30000);
+if (settings.inboxAuto) setTimeout(() => pollInbox(false), 1500);
+
 /* ------------------------------------------------------------------ events */
 document.addEventListener("click", async (e) => {
   const t = e.target.closest("button, [data-close]");
@@ -1764,6 +1916,18 @@ document.addEventListener("click", async (e) => {
     settings.claudeKey = $("#cKey").value.trim(); settings.claudeModel = $("#cModel").value.trim() || "claude-sonnet-5-5";
     settings.azureEndpoint = $("#aEnd").value.trim(); settings.azureDeployment = $("#aDep").value.trim(); settings.azureKey = $("#aKey").value.trim();
     store("nashflow.settings", settings); renderProviderPill(); $("#settingsModal").hidden = true; render(); toast("AI provider saved"); return;
+  }
+  if (t.dataset.act && t.dataset.act.startsWith("inbox-")) {
+    const a = t.dataset.act;
+    if (a === "inbox-save" || a === "inbox-test" || a === "inbox-check") {
+      settings.inboxUrl = ($("#ibUrl").value || "").trim(); settings.inboxKey = ($("#ibKey").value || "").trim();
+      settings.inboxAuto = $("#ibAuto").checked; settings.chaseAuto = $("#ibChase").checked; store("nashflow.settings", settings);
+    }
+    if (a === "inbox-save") { toast("Inbox settings saved"); render(); }
+    else if (a === "inbox-test") { try { const r = await inboxCall("ping"); inboxState.error = ""; toast("Connected to " + (r.inbox || "the inbox")); inboxLog("Connected to " + (r.inbox || "the inbox")); } catch (err) { inboxState.error = err.message; toast(err.message); } store("nashflow.inbox.state", inboxState); render(); }
+    else if (a === "inbox-check") { await pollInbox(true); render(); }
+    else if (a === "inbox-copy") copyText(INBOX_SCRIPT, "Script copied");
+    return;
   }
   const c = cur(); if (!c) return;
   const act = t.dataset.act;
@@ -1795,6 +1959,11 @@ document.addEventListener("click", async (e) => {
   }
   else if (act === "copy-req") { c.brokerRequest = $("#brokerReq").value; save(); copyText(c.brokerRequest, "Email copied"); }
   else if (act === "log-req") { c.brokerRequest = $("#brokerReq").value; c.status = "More information requested"; audit(c, actor(), "Marked the request to the broker as sent"); save(); render(); toast("Marked as sent to the broker"); }
+  else if (act === "chase-send" || act === "chase-remind") {
+    if (act === "chase-remind" && c.chase && (c.chase.sinceReply || 0) >= 2) { c.chase.flagRM = true; audit(c, "Intake agent", "No reply from the broker after 2 emails. Flagged to the RM.", "agent"); inboxLog(`${c.ref}: no reply after 2 emails, flagged to the RM`); }
+    else { try { await sendToBroker(c, act === "chase-remind" ? "Reminder" : "Request"); toast(act === "chase-remind" ? "Reminder sent" : "Sent to the broker"); } catch (err) { toast(err.message); } }
+    save(); render();
+  }
   else if (act === "comment") { commenting = t.dataset.key; render(); const el = $("#cmtEdit"); if (el) el.focus(); }
   else if (act === "cancel-cmt") { commenting = null; render(); }
   else if (act === "save-cmt") {

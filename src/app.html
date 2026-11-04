@@ -611,8 +611,9 @@ function stageOf(c) { return c.stage || (c.decision ? (c.decision.choice === "De
 function waitingOn(c) { const s = stageOf(c); return s === "uw" ? "Underwriter" : s === "rm" || s === "returned" ? "Relationship Manager" : null; }
 function audit(c, who, what, kind = "human") { c.audit.push({ at: nowISO(), who, what, kind }); }
 
-async function newCaseFromFiles(files, title) {
+async function newCaseFromFiles(files, title, extra) {
   const c = { id: uid(), createdAt: nowISO(), title: title || "New case", status: "New (being read by agents)", docs: [], audit: [], run: null, fields: null, tenants: [], checks: [], consistency: [], judgements: [], memo: null, rec: null, decision: null };
+  if (extra) Object.assign(c, extra);
   cases.unshift(c); currentId = c.id; currentTab = "summary";
   memImages[c.id] = [];
   render();
@@ -634,6 +635,26 @@ async function newCaseFromFiles(files, title) {
   }
   save(); render();
   runAgents(c);
+  return c;
+}
+/* Add documents to an existing case (for example a broker's reply) and run the agents again */
+async function addFilesToCase(c, files, who) {
+  memImages[c.id] = memImages[c.id] || [];
+  let i = c.docs.length;
+  for (const f of files) {
+    i++;
+    try {
+      const d = await readFile(f);
+      d.id = "D" + i;
+      if (d.kind === "pdf") await fileStore.put(c.id + "/" + d.id, { name: f.name, bytes: await f.arrayBuffer() });
+      d.images.forEach((im) => memImages[c.id].push(Object.assign({ doc: d.id }, im)));
+      d.imagePages = d.images.map((im) => im.page); delete d.images;
+      c.docs.push(d);
+      audit(c, who || "Intake agent", `Read ${d.id} "${d.name}" (${d.pages.length} page${d.pages.length > 1 ? "s" : ""})`, "agent");
+    } catch (e) { audit(c, who || "Intake agent", `Could not read "${f.name}": ${e.message}`, "agent"); }
+  }
+  save(); render();
+  return runAgents(c);
 }
 
 /* ------------------------------------------------------------------ prompts */
@@ -1170,6 +1191,7 @@ async function runAgents(c, onlyMemo = false) {
   }
   c.run.running = false;
   save(); render();
+  if (typeof afterRun === "function") { try { await afterRun(c); } catch (e) { /* inbox follow-up is best effort */ } }
 }
 
 /* ------------------------------------------------------------------ human actions */

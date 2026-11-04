@@ -22,6 +22,10 @@ Open the GitHub Pages address for this repository. In the sidebar, choose **Chan
 
 Keys and cases are saved in your own browser only. The same page also runs at the claude.ai artifact link, where it uses Claude through your claude.ai account with no key.
 
+## Deals inbox (Gmail demo)
+
+Under **Administration, Deals inbox**, the app can read a Gmail account set up for demos. When a broker emails a pack to it, a case opens and the agents run with no clicks. Broker replies in the same thread are added to the case. With automatic follow-up on, NashFlow emails the broker for anything missing, reminds after 2 working days and flags the RM after 2 unanswered emails. The Google Apps Script and set-up steps are in `gmail-intake/Code.gs` and on the Deals inbox page. It works on the hosted site and the downloaded copy, not inside the claude.ai link. Send it made-up or anonymised packs only.
+
 A complete demo pack is in `demo-pack/`. Three test packs (clean, incomplete, inconsistent) are built into the app under New case.
 
 ## Making changes
@@ -31,7 +35,8 @@ A complete demo pack is in `demo-pack/`. Three test packs (clean, incomplete, in
 - `src/bottom.js`: the screens and interactions.
 - `src/build.py`: stitches the three together, embeds the sample packs and writes `index.html` (hosted site) and `src/nashflow-deal-processor.html` (claude.ai artifact).
 - `src/make_samples.py` and `src/make_demo_pack.py`: generate the fictional packs.
-- `src/test.js`: runs the app in Playwright with simulated AI replies.
+- `gmail-intake/Code.gs`: the Google Apps Script for the demo inbox (embedded in the page by `build.py`).
+- `src/test.js`: runs the app in Playwright with simulated AI replies and a simulated inbox.
 
 To rebuild: `cd src && python3 make_samples.py && python3 make_demo_pack.py && python3 build.py`.
 

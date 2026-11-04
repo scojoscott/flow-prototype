@@ -40,6 +40,7 @@ for k, (label, blurb) in meta.items():
 
 out = top + "\n" + mid + bottom
 out = out.replace("/*__SAMPLES__*/null", json.dumps(samples))
+out = out.replace('/*__GAS__*/""', json.dumps(open(os.path.join(H, "..", "gmail-intake", "Code.gs")).read()))
 assert "—" not in out, "em dash found"
 open(os.path.join(H, "nashflow-deal-processor.html"), "w").write(out)
 # Hosted copy for GitHub Pages: a full HTML document at the repo root
