@@ -524,6 +524,11 @@ const PROVIDERS = {
 const GEMINI_DEFAULT = "gemini-3.8-flash";
 let geminiSessionModel = null; // a fallback used for the rest of this visit when the chosen model is busy
 let settings = Object.assign({ provider: "auto", geminiKey: "", geminiModel: GEMINI_DEFAULT, claudeKey: "", claudeModel: "claude-sonnet-5-5", azureEndpoint: "", azureDeployment: "", azureKey: "", azureVersion: "2024-10-21" }, load("nashflow.settings", {}));
+/* Demo links can carry a Gemini key after the # (for example .../#gk=KEY). It is saved in this browser and removed from the address bar, so the key is never in the code or sent to the web server. */
+try {
+  const hp = new URLSearchParams(location.hash.slice(1));
+  if (hp.get("gk")) { settings.geminiKey = hp.get("gk"); store("nashflow.settings", settings); history.replaceState(null, "", location.pathname + location.search); }
+} catch (e) { /* no key in the link */ }
 if (/^gemini-(1|2)\./.test(settings.geminiModel || "")) { settings.geminiModel = GEMINI_DEFAULT; store("nashflow.settings", settings); }
 let sampleFn = null;
 let sampleChecked = false;
