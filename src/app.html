@@ -1120,6 +1120,7 @@ function finBlock(c) {
 }
 
 /* ------------------------------------------------------------------ the agent run */
+function stopCheck(c) { if (c.run && c.run.cancel) throw new Error(c.run.cancel); }
 async function runAgents(c, onlyMemo = false) {
   const imgs = memImages[c.id] || [];
   const steps = [
@@ -1138,6 +1139,7 @@ async function runAgents(c, onlyMemo = false) {
     if (!onlyMemo) {
       set("extract", "active");
       const r = await askAI(extractPrompt(c, imgs), imgs, "extract");
+      stopCheck(c);
       normaliseExtraction(c, r);
       const found = FIELDS.filter((f) => c.fields[f.key].state === "Found").length;
       set("extract", "done", `${found} of ${FIELDS.length} fields found, ${c.tenants.length} tenant${c.tenants.length === 1 ? "" : "s"}, ${c.consistency.length} consistency flag${c.consistency.length === 1 ? "" : "s"}`);
@@ -1153,17 +1155,21 @@ async function runAgents(c, onlyMemo = false) {
       set("fin", "active");
       try {
         const fr = await askAI(finPrompt(c), [], "financials");
+        stopCheck(c);
         computeFinancials(c, fr);
         set("fin", "done", `${c.financials.periods.length} year${c.financials.periods.length === 1 ? "" : "s"} spread, ${c.financials.guarantors.length} guarantor statement${c.financials.guarantors.length === 1 ? "" : "s"}, ${c.financials.flags.length} flag${c.financials.flags.length === 1 ? "" : "s"}`);
         audit(c, "Financial analysis agent", `Spread ${c.financials.periods.length} years of accounts and ${c.financials.guarantors.length} guarantor statements; ratios calculated in code`, "agent");
       } catch (e) {
+        if (c.run.cancel) throw e;
         c.financials = null;
         set("fin", "error", "Skipped: " + (e.message || e));
         audit(c, "Financial analysis agent", "Stopped, the memo continues without the spread: " + (e.message || e), "agent");
       }
     }
     set("memo", "active");
+    stopCheck(c);
     const m = await askAI(memoPrompt(c), [], "memo");
+    stopCheck(c);
     c.judgements = JUDGEMENT_AREAS.map((j) => {
       const got = (m.judgements || []).find((x) => String(x.area || "").toLowerCase() === j.area.toLowerCase()) || {};
       const outcome = ["Pass", "Fail", "Unclear"].includes(got.outcome) ? got.outcome : "Unclear";
