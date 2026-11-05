@@ -7,14 +7,14 @@ let draftDecision = { choice: "", grade: "", rationale: "", exception: "" };
 let commenting = null;
 const shortMoney = (n) => (n == null || !isFinite(n) ? "-" : n >= 1e6 ? "£" + (n / 1e6).toFixed(n % 1e6 === 0 ? 0 : 2).replace(/\.?0+$/, "") + "m" : n >= 1e3 ? "£" + Math.round(n / 1e3) + "k" : "£" + Math.round(n));
 
-function refChip(doc, page, quote, label) {
+function refChip(doc, page, quote, label, ctx) {
   const c = cur(); const d = c && c.docs.find((x) => x.id === doc);
   const name = label || (d ? `${d.type && d.type !== "Other" ? d.type : d.name.replace(/\.[a-z]+$/i, "")} p.${page || 1}` : `${doc} p.${page || 1}`);
-  return `<button class="ref" type="button" data-src="${esc(doc)}" data-page="${esc(page || 1)}" data-quote="${esc(quote || "")}" title="Open ${esc(d ? d.name : doc)}">${esc(name)}</button>`;
+  return `<button class="ref" type="button" data-src="${esc(doc)}" data-page="${esc(page || 1)}" data-quote="${esc(quote || "")}"${ctx ? ` data-ctx="${esc(ctx.slice(0, 400))}"` : ""} title="Open ${esc(d ? d.name : doc)}">${esc(name)}</button>`;
 }
 function renderRich(text) {
   const blocks = String(text || "").replace(/\r/g, "").split(/\n\s*\n/);
-  const inline = (s) => esc(s).replace(/\[(D\d+)\s*,?\s*p(?:age)?\.?\s*(\d+)\]/gi, (_, d, p) => refChip(d, p, "")).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>");
+  const inline = (s) => { const ctx = s.replace(/\[(D\d+)[^\]]*\]/gi, " ").replace(/\*\*/g, ""); return esc(s).replace(/\[(D\d+)\s*,?\s*p(?:age)?\.?\s*(\d+)\]/gi, (_, d, p) => refChip(d, p, "", "", ctx)).replace(/\*\*(.+?)\*\*/g, "<b>$1</b>"); };
   const isB = (l) => /^\s*[-•*]\s+/.test(l) && !/^\s*\*\*/.test(l);
   return blocks.map((b) => {
     const lines = b.split("\n").filter((l) => l.trim());
@@ -167,14 +167,18 @@ function renderCasesRM() {
       : `<div class="card"><h2>No cases yet</h2><p class="hint">Upload a deal pack or run one of the sample packs.</p><div><button class="btn primary" type="button" data-view="new">New case</button></div></div>`);
 }
 
-function toCheckCount(c) { return c.fields ? FIELDS.filter((f) => { const x = c.fields[f.key]; return !x.edited && (x.state === "Not confident" || (x.state === "Not present" && (f.mandatory || f.mandatoryIf))); }).length : 0; }
+/* Only the fields that drive the credit decision need an RM to confirm them. */
+const KEY_FIELDS = new Set(["purpose", "loan_amount", "loan_term_years", "owned_by_borrower", "purchase_price", "borrower_name", "property_address", "property_value", "annual_rent"]);
+function isKey(c, key) { return KEY_FIELDS.has(key) && !(key === "purchase_price" && c.fields && c.fields[key].state === "Not applicable"); }
+function needsCheck(c, key) { const x = c.fields[key]; return isKey(c, key) && !x.edited && (x.state === "Not confident" || x.state === "Not present"); }
+function toCheckCount(c) { return c.fields ? FIELDS.filter((f) => needsCheck(c, f.key)).length : 0; }
 /* What the current role should do next on a case. Shown as a banner on the case and as the to-do list on the RM's home page. */
 function nextStep(c) {
   const st = stageOf(c), r = currentRole, p = c.pricing;
   if (!c.memo) return c.run && c.run.error ? { text: "The agents stopped before the case was ready. Run them again to carry on.", tab: "agents", label: "See what happened", mine: r === "Relationship Manager" } : { text: "The agents are reading the deal pack. The case is ready in a minute or two." };
   if (r === "Relationship Manager") {
-    if (st === "returned") return { text: "The Underwriter returned this case" + (c.returned ? ": " + c.returned.reason : ".") + " Get what they need, then submit it again.", tab: "decision", label: "Resubmit to the Underwriter", mine: true };
-    if (st === "rm") { const n = toCheckCount(c); const m = c.consistency.length; return n || m ? { text: `Check ${[n ? n + " field" + (n > 1 ? "s" : "") + " the agents weren't sure about" : "", m ? m + " mismatch" + (m > 1 ? "es" : "") + " between documents" : ""].filter(Boolean).join(" and ")}, then submit to the Underwriter.`, tab: "source", label: "Check the fields", mine: true } : { text: "The agents' work is complete and consistent. Add your note and submit to the Underwriter.", tab: "decision", label: "Submit to the Underwriter", mine: true }; }
+    if (st === "returned") return { text: "The Underwriter returned this case" + (c.returned ? ": " + c.returned.reason : ".") + " Get what they need, then send it to credit again.", tab: "memo", label: "Send to credit again", mine: true };
+    if (st === "rm") { const n = toCheckCount(c); const m = c.consistency.length; return n || m ? { text: `Check ${[n ? n + " key field" + (n > 1 ? "s" : "") : "", m ? m + " mismatch" + (m > 1 ? "es" : "") + " between documents" : ""].filter(Boolean).join(" and ")}, then send it to credit.`, tab: "source", label: "Check the fields", mine: true } : { text: "The agents' work is complete and consistent. Review the credit memo, add your note and send it to credit.", tab: "memo", label: "Go to the credit memo", mine: true }; }
     if (st === "uw") return { text: "With the Underwriter. Nothing for you to do unless they return it." };
     if (st === "approved") {
       if (!p || p.status === "draft") return { text: p && p.sentBack ? "Commercial sent the pricing back: " + p.sentBack.reason : "Approved by the Underwriter. Propose pricing for Commercial to approve.", tab: "pricing", label: "Propose pricing", mine: true };
@@ -206,7 +210,7 @@ function tabsFor(c) {
   const flags = c.checks.concat(c.judgements).filter((k) => k.flag === "red" || k.flag === "amber").length + c.consistency.length;
   const T = {
     review: ["review", "Guided review", stageOf(c) === "uw" ? `<span class="chip c-red">Your decision</span>` : ""],
-    memo: ["memo", "Credit memo"],
+    memo: ["memo", "Credit memo", currentRole === "Relationship Manager" && ["rm", "returned"].includes(stageOf(c)) && c.memo ? `<span class="chip c-red">Send to credit</span>` : ""],
     source: ["source", "Source check", toCheck && currentRole === "Relationship Manager" ? `<span class="chip c-amber">${toCheck} to check</span>` : ""],
     fin: ["fin", "Financials", c.financials && c.financials.flags.length ? `<span class="chip c-amber">${c.financials.flags.length} flag${c.financials.flags.length > 1 ? "s" : ""}</span>` : ""],
     policy: ["policy", "Policy checks", flags ? `<span class="chip c-amber">${flags} flag${flags > 1 ? "s" : ""}</span>` : ""],
@@ -218,9 +222,9 @@ function tabsFor(c) {
     audit: ["audit", "Audit"],
   };
   const approved = c.decision && c.decision.choice === "Approve";
-  const ids = currentRole === "Underwriter" ? ["review", "memo", "source", "fin", "policy", "docs", "comms", "agents", "decision"].concat(approved ? ["pricing"] : [], ["audit"])
+  const ids = currentRole === "Underwriter" ? ["review", "decision", "memo", "source", "fin", "policy", "docs", "comms", "agents"].concat(approved ? ["pricing"] : [], ["audit"])
     : currentRole === "Commercial" ? ["pricing", "memo", "fin", "policy", "docs", "comms", "audit"]
-    : ["memo", "source", "fin", "policy", "docs", "comms", "agents", "decision", "pricing", "audit"];
+    : ["memo", "source", "fin", "policy", "docs", "comms", "agents", "pricing", "audit"];
   return ids.map((id) => T[id]);
 }
 function defaultTab(c) {
@@ -252,7 +256,7 @@ function renderCaseView(c) {
   const toCheck = ready ? FIELDS.filter((f) => { const x = c.fields[f.key]; return !x.edited && (x.state === "Not confident" || (x.state === "Not present" && (f.mandatory || f.mandatoryIf))); }).length : 0;
   const flags = c.checks.concat(c.judgements).filter((k) => k.flag === "red" || k.flag === "amber").length + mism;
   const broker = ready ? usable(c, "broker") : null;
-  const sub = [broker ? "From " + broker : "Uploaded", "received " + dateOf(c.createdAt) + " " + timeOf(c.createdAt), ready ? (miss || mism ? [miss ? miss + " missing" : "", mism ? mism + " mismatch" : ""].filter(Boolean).join(", ") : "complete and consistent") : "agents reading", "policy: illustrative UK market standard"].join(" · ");
+  const sub = [broker ? "From " + broker : "Uploaded", "received " + dateOf(c.createdAt) + " " + timeOf(c.createdAt)].concat(ready ? [] : ["agents reading"]).join(" · ");
   const rb = ready ? String(usable(c, "repayment_basis") || "").toLowerCase() : "";
   const recTone = c.rec && c.memo ? { approve: "green", decline: "red", more: "amber", escalate: "blue" }[c.rec.kind] : "";
   const tabs = tabsFor(c);
@@ -273,11 +277,13 @@ function renderCaseView(c) {
 }
 function caseTiles(c, o) {
   const { L, T, V, ltv, icr, rb, recTone, toCheck, ready } = o;
-  const fac = tile("Facility", shortMoney(L), T != null ? `${T} years${rb ? ", " + esc(rb) : ""}` : "");
-  const ltvT = tile("LTV", ltv ? esc(ltv.value) : "-", V != null ? `on ${shortMoney(V)} ${/estimate/i.test(String(usable(c, "value_basis") || "")) ? "estimate" : "valuation"}` : "", ltv && ltv.outcome === "Fail" ? "red" : "");
-  const icrT = tile("Interest cover", icr ? esc(icr.value) : "-", `policy minimum ${POLICY.minICR}x`, icr && icr.outcome === "Fail" ? "red" : "");
+  const rag = (...ks) => { ks = ks.filter(Boolean); if (!ready || !ks.length) return ""; if (ks.some((k) => k.outcome === "Fail")) return "red"; if (ks.some((k) => k.outcome === "Unclear" || k.flag === "amber")) return "amber"; return "green"; };
+  const chk = (id) => c.checks.find((k) => k.id === id);
+  const fac = tile("Facility", shortMoney(L), T != null ? `${T} years${rb ? ", " + esc(rb) : ""}` : "", rag(chk("size"), chk("term")));
+  const ltvT = tile("LTV", ltv ? esc(ltv.value) : "-", V != null ? `on ${shortMoney(V)} ${/estimate/i.test(String(usable(c, "value_basis") || "")) ? "estimate" : "valuation"}` : "", rag(ltv));
+  const icrT = tile("Interest cover", icr ? esc(icr.value) : "-", `policy minimum ${POLICY.minICR}x`, rag(icr));
   const vd = verdict(c);
-  const recT = vd ? tile(vd.decided ? "Decision" : "Recommendation", esc(vd.label), esc(vd.sub), { approve: "green", decline: "red", more: "amber", escalate: "blue" }[vd.kind]) : tile("Recommendation", "-", "");
+  const recT = vd ? tile(vd.decided ? "Decision" : "Recommendation", esc(vd.label), esc(vd.sub), { approve: "green", decline: "red", more: "amber", escalate: "amber" }[vd.kind]) : tile("Recommendation", "-", "");
   const gradeT = tile("Risk grade", c.decision && c.decision.grade ? c.decision.grade + " of 10" : "Not set", "set by the Underwriter");
   if (currentRole === "Underwriter") {
     const fl = ready && c.memo ? reviewFlags(c).length : 0;
@@ -287,7 +293,7 @@ function caseTiles(c, o) {
     const g = gridPricing(c); const p = c.pricing; const f = p ? priceFigures(c, p) : null;
     return fac + ltvT + gradeT + tile("Grid margin", pctTxt(g.margin), "policy section 7.3") + tile("Proposed rate", p ? pctTxt(f.rate) : "-", p ? "margin " + pctTxt(p.margin) : "RM still pricing", p && p.margin < g.margin - 1e-9 ? "amber" : "") + tile("ICR at that rate", f && f.icr != null ? f.icr.toFixed(2) + "x" : "-", `policy minimum ${POLICY.minICR}x`, f && f.icr != null && !f.icrOk ? "red" : "");
   }
-  return fac + ltvT + icrT + recT + gradeT + tile("Fields found", ready ? `${FIELDS.filter((f) => c.fields[f.key].state === "Found").length} of ${FIELDS.length}` : "-", ready ? (toCheck ? `${toCheck} for you to check` : "nothing to check") : "");
+  return fac + ltvT + icrT + recT + gradeT + tile("Fields found", ready ? `${FIELDS.filter((f) => c.fields[f.key].state === "Found").length} of ${FIELDS.length}` : "-", ready ? [toCheck ? `${toCheck} key field${toCheck > 1 ? "s" : ""} to confirm` : "key fields confirmed"].concat(c.consistency.length ? [`${c.consistency.length} mismatch${c.consistency.length > 1 ? "es" : ""}`] : []).join(", ") : "", ready ? (toCheck || c.consistency.length ? "amber" : "green") : "");
 }
 function renderAgents(c) {
   if (!c.run) return "";
@@ -308,7 +314,7 @@ function renderMemoTab(c) {
   if (!c.memo) return renderWorking(c);
   const recbar = recBar(c, 3);
   const stale = c.memoStale ? `<div class="stale"><span>Figures changed after the memo was drafted. The policy assessment and recommendation are updated; the written sections are not.</span><button class="btn small" type="button" data-act="redraft">Redraft agent sections</button></div>` : "";
-  const memo = `<div class="card"><div class="cardhead"><h2>Credit memo</h2><div class="row"><span class="chip c-amber">Draft</span><button class="btn small" type="button" data-act="copy-memo">Copy memo</button></div></div>
+  const memo = `<div class="card memocard"><div class="cardhead"><h2>Credit memo</h2><div class="row"><span class="chip c-amber">Draft</span><button class="btn small" type="button" data-act="copy-memo">Copy memo</button></div></div>
     <div class="legend"><span><i style="background:var(--muted)"></i>Drafted by the memo agent until a person edits a section. Every edit is audited.</span><span><i style="background:var(--accent)"></i>Red tags open the source document and page.</span></div>
     ${MEMO_SECTIONS.map(([k, name]) => {
       let s = c.memo[k] || { text: "", by: "Memo agent" };
@@ -319,7 +325,20 @@ function renderMemoTab(c) {
       const body = editingSection === k ? `<textarea class="ed" id="memoEdit" aria-label="${esc(name)}">${esc(s.text)}</textarea><div class="row"><button class="btn primary small" type="button" data-act="save-sec" data-key="${k}">Save</button><button class="btn small" type="button" data-act="cancel-sec">Cancel</button></div>` : `<div class="memo-body">${renderRich(s.text) || '<p class="note">Empty</p>'}</div>`;
       return `<section class="memo-sec"><header><h3>${esc(name)}</h3><span class="by">${by}</span><span class="grow"></span>${editingSection === k ? "" : `${cm.length ? `<span class="chip c-blue">${cm.length} comment${cm.length > 1 ? "s" : ""}</span>` : ""}<button class="btn small" type="button" data-act="comment" data-key="${k}">Comment</button><button class="btn small" type="button" data-act="edit-sec" data-key="${k}">Edit</button>`}</header>${body}${cmHtml}</section>`;
     }).join("")}</div>`;
-  return `<div class="stack">${recbar}${stale}${memo}</div>`;
+  return `<div class="stack">${recbar}${stale}${memo}${currentRole === "Relationship Manager" ? sendToCredit(c) : ""}</div>`;
+}
+function sendToCredit(c) {
+  const st = stageOf(c);
+  if (st === "uw") return `<div class="card"><div class="cardhead"><h2>Sent to credit</h2><span class="chip c-amber">With the Underwriter</span></div><p class="hint">Sent by ${esc(c.submitted ? c.submitted.by : "the RM")}${c.submitted ? ", " + dateOf(c.submitted.at) + " " + timeOf(c.submitted.at) : ""}. You can still comment on the memo. The Underwriter can return it to you for more information.</p><div><button class="btn" type="button" data-role="Underwriter">Continue as the Underwriter</button></div></div>`;
+  if (st === "approved" || st === "terms") return `<div class="card"><h2>Next: pricing and terms</h2><p class="hint">${c.terms && c.terms.issued ? "Terms letter issued." : c.pricing && c.pricing.status === "agreed" ? "Pricing agreed. You can issue the terms letter." : c.pricing && c.pricing.status === "awaiting" ? "Pricing is waiting for approval by Commercial." : "Propose pricing from the lender's grid, then Commercial approves it."}</p><div><button class="btn primary small" type="button" data-tab="pricing">Go to pricing and terms</button></div></div>` + conditionsCard(c, false);
+  if (st === "declined") return "";
+  const ret = st === "returned" && c.returned ? `<div class="errbox"><b>Returned by the Underwriter, ${dateOf(c.returned.at)} ${timeOf(c.returned.at)}.</b> ${esc(c.returned.reason)}</div>` : "";
+  const toCheck = toCheckCount(c); const mism = c.consistency.length; const reqSent = (c.audit || []).some((a) => /request to the broker as sent/i.test(a.what)) || (c.chase && c.chase.sent && c.chase.sent.length);
+  const item = (ok, text) => `<li class="${ok ? "ok" : "todo"}">${ok ? "Done" : "Open"}: ${esc(text)}</li>`;
+  return `<div class="card sendcredit">${ret}<h2>Send to credit</h2><p class="hint">When you're happy with the memo and its recommendation, send the case to the Underwriter for a decision.</p>
+    <ul class="ready">${item(!toCheck, toCheck ? `${toCheck} key field${toCheck > 1 ? "s" : ""} to confirm in Source check` : "Key fields confirmed")}${item(!mism, mism ? `${mism} mismatch${mism > 1 ? "es" : ""} between documents` : "No mismatches")}${c.rec.kind === "more" ? item(reqSent, reqSent ? "Request sent to the broker" : "Request to the broker not sent yet (see Communication)") : ""}</ul>
+    <div class="field"><label for="rmNote">Note to the Underwriter</label><textarea class="ed" id="rmNote" placeholder="What the Underwriter should know: your view, open points, anything you've checked with the broker"></textarea></div>
+    <div class="row"><button class="btn primary" type="button" data-act="submit-uw">Send to credit</button><span class="note">Open items are shown to the Underwriter. The conditions agent runs when you send it.</span></div></div>`;
 }
 function renderAgentsTab(c) {
   return c.run ? `<div class="stack">${renderAgents(c)}</div>` : `<div class="card"><h2>Agents at work</h2><p class="hint">The agents have not run on this case yet.</p></div>`;
@@ -420,19 +439,21 @@ function pageView(c, docId, page, quote) {
 function pickField(c) {
   if (!c.fields) return "annual_rent";
   const m = c.consistency.find((y) => FIELD[y.key]); if (m) return m.key;
-  const f = FIELDS.find((f) => ["Not present", "Not confident"].includes(c.fields[f.key].state) && !c.fields[f.key].edited);
+  const f = FIELDS.find((f) => needsCheck(c, f.key));
   return f ? f.key : "annual_rent";
 }
 function renderSource(c) {
   if (!FIELD[selectedField] || selectedField === "__auto") selectedField = pickField(c);
   let g = ""; let list = "";
-  FIELDS.forEach((f) => {
+  const ordered = FIELDS.filter((f) => isKey(c, f.key)).concat(FIELDS.filter((f) => !isKey(c, f.key)));
+  ordered.forEach((f) => {
     const x = c.fields[f.key];
-    if (f.group !== g) { g = f.group; list += `<div class="fgroup">${g}</div>`; }
+    const grp = isKey(c, f.key) ? "Key fields to confirm" : "Other fields (no need to check unless something looks wrong)";
+    if (grp !== g) { g = grp; list += `<div class="fgroup">${g}</div>`; }
     const val = x.value == null || x.value === "" ? "" : f.type === "money" ? money(x.value) : String(x.value);
     const more = (x.candidates || []).filter((k) => k.doc).length - 1;
     const d = x.source ? c.docs.find((y) => y.id === x.source.doc) : null;
-    const chip = !x.edited && c.consistency.some((y) => y.key === f.key) ? `<span class="chip c-amber">Mismatch</span>` : x.edited ? `<span class="chip c-green">${x.edited.confirmed ? "Confirmed" : "Corrected"}</span>` : `<span class="chip ${stateClass(x.state)}">${esc(x.state)}</span>`;
+    const chip = !x.edited && c.consistency.some((y) => y.key === f.key) ? `<span class="chip c-amber">Mismatch</span>` : x.edited ? `<span class="chip c-green">${x.edited.confirmed ? "Confirmed" : "Corrected"}</span>` : !isKey(c, f.key) && x.state !== "Found" ? `<span class="chip c-grey">${esc(x.state)}</span>` : `<span class="chip ${stateClass(x.state)}">${esc(x.state)}</span>`;
     list += `<button type="button" class="frow ${selectedField === f.key ? "sel" : ""}" data-field="${f.key}"><span class="k">${esc(f.label)}</span>${chip}<span class="v">${esc(val) || '<span class="note">Blank</span>'}</span>${x.source ? `<span class="from">From ${esc(d ? d.type || d.name : x.source.doc)} p.${esc(x.source.page)}${more > 0 ? ` + ${more} more` : ""}${x.backfilled ? " (not given by the broker)" : ""}</span>` : x.note ? `<span class="note">${esc(x.note)}</span>` : ""}</button>`;
   });
   const f = FIELD[selectedField]; const x = c.fields[selectedField];
@@ -449,7 +470,7 @@ function renderSource(c) {
     <div id="editArea" class="row"><button class="btn small" type="button" data-act="edit-field" data-key="${f.key}">Correct value</button>${x.state === "Not confident" && !x.edited ? `<button class="btn small" type="button" data-act="confirm-field" data-key="${f.key}">Confirm value</button>` : ""}</div>
   </div>`;
   const tenants = `<div class="card"><h2>Tenants</h2>${c.tenants.length ? `<div class="tablewrap bare"><table class="t"><thead><tr><th>Tenant</th><th>Rent pa</th><th>Lease end</th><th>Break</th><th>Source</th></tr></thead><tbody>${c.tenants.map((t) => `<tr><td>${esc(t.name)}${t.note ? `<span class="sub">${esc(t.note)}</span>` : ""}</td><td class="num">${money(t.annual_rent)}</td><td class="num">${t.lease_end ? esc(t.lease_end) : '<span class="chip c-amber">Not confident</span>'}</td><td class="num">${esc(t.break_date || "-")}</td><td>${t.source && t.source.doc ? refChip(t.source.doc, t.source.page, t.source.quote) : ""}</td></tr>`).join("")}</tbody></table></div>` : `<p class="hint">No tenancy schedule or leases in the pack.</p>`}</div>`;
-  return `<p class="intro">Check the agents' work. Pick any field to see the document it came from, with the text highlighted, and every other document that mentions it. Corrections are audited and the checks recalculate.</p>
+  return `<p class="intro">Confirm the key fields the credit decision depends on${toCheckCount(c) ? `: ${toCheckCount(c)} still to confirm` : ". All confirmed or found"}. Pick any field to see the document it came from, with the text highlighted. Corrections are audited and the checks recalculate.</p>
     <div class="grid2 even"><div class="stack"><div class="fieldlist">${list}</div>${tenants}</div><div>${detail}</div></div>`;
 }
 function renderFinancials(c) {
@@ -680,7 +701,7 @@ function renderDecision(c) {
   else if (currentRole === "Relationship Manager") {
     if (st === "uw") main = sub + `<div class="card"><h2>With the Underwriter</h2><p class="hint">You submitted this case. You can still read it and add comments. The Underwriter can return it to you for more information.</p></div>` + switchTo("Underwriter", "Continue as the Underwriter");
     else {
-      const toCheck = FIELDS.filter((f) => { const x = c.fields[f.key]; return !x.edited && (x.state === "Not confident" || (x.state === "Not present" && (f.mandatory || f.mandatoryIf))); }).length;
+      const toCheck = toCheckCount(c);
       const mism = c.consistency.length; const reqSent = (c.audit || []).some((a) => /request to the broker as sent/i.test(a.what));
       const edits = MEMO_SECTIONS.filter(([k]) => c.memo[k] && !["Memo agent", "System"].includes(c.memo[k].by)).length;
       const item = (ok, text) => `<li class="${ok ? "ok" : "todo"}">${ok ? "Done" : "Open"}: ${esc(text)}</li>`;
@@ -858,6 +879,31 @@ function openSource(docId, page, quote) {
   document.body.classList.add("src-open");
   hydratePages($("#srcBody"));
   const m = $("#srcBody .pdfscroll mark"); if (m) { const sc = m.closest(".pdfscroll"); sc.scrollTop = Math.max(0, m.offsetTop - sc.clientHeight / 3); }
+}
+/* A memo tag has no quote of its own, so find the passage on that page that best matches the memo sentence. */
+function numsIn(s) {
+  const out = [];
+  String(s).replace(/(\d[\d,]*(?:\.\d+)?)\s*(m|k|%|x)?/gi, (m, n, u) => { let v = parseFloat(n.replace(/,/g, "")); if (!isFinite(v)) return m; if (u && /m/i.test(u)) v *= 1e6; else if (u && /k/i.test(u)) v *= 1e3; if (v >= 10 || /\./.test(n) || u) out.push(v); return m; });
+  return out;
+}
+const STOP = new Set(["which", "their", "there", "these", "those", "about", "under", "after", "before", "where", "while", "would", "should", "could", "being", "between", "within", "against", "other"]);
+function wordsIn(s) { return new Set((String(s).toLowerCase().match(/[a-z][a-z'-]{4,}/g) || []).filter((w) => !STOP.has(w))); }
+function quoteFor(c, doc, page, ctx) {
+  if (!c) return "";
+  const d = c.docs.find((x) => x.id === doc); if (!d) return "";
+  const pg = Math.min(Math.max(1, +page || 1), d.pages.length); const text = d.pages[pg - 1] || "";
+  const cn = numsIn(ctx), cw = wordsIn(ctx);
+  const close = (a, b) => Math.abs(a - b) <= Math.max(Math.abs(b) * 0.006, 0.006);
+  const score = (q, n) => { let s = 0; if (n != null && cn.some((x) => close(x, n))) s += 6; numsIn(q).forEach((v) => { if (cn.some((x) => close(x, v))) s += 3; }); const qw = wordsIn(q); qw.forEach((w) => { if (cw.has(w)) s += 1; }); return s; };
+  const opts = [];
+  const on = (src) => src && src.doc === doc && String(src.page || 1) === String(pg) && src.quote;
+  if (c.fields) FIELDS.forEach((f) => { const x = c.fields[f.key]; [x.source].concat(x.candidates || []).forEach((k) => { if (on(k)) opts.push({ q: k.quote, n: k.num != null ? k.num : typeof x.value === "number" ? x.value : null, bonus: 1 }); }); });
+  (c.tenants || []).forEach((t) => { if (on(t.source)) opts.push({ q: t.source.quote, n: t.annual_rent, bonus: 0 }); });
+  if (c.financials) Object.values(c.financials.lines || {}).forEach((l) => { if (on(l.source)) opts.push({ q: l.source.quote, n: null, bonus: 0 }); });
+  text.split(/\n+/).map((l) => l.trim()).filter((l) => l.length > 6 && l.length < 300).forEach((l) => opts.push({ q: l, n: null, bonus: 0 }));
+  let best = null, bs = 1;
+  opts.forEach((o) => { const s = score(o.q, o.n); const v = s ? s + o.bonus : 0; if (v > bs && highlight(text, o.q).found) { best = o.q; bs = v; } });
+  return best || "";
 }
 function deleteCase(x) {
   if (x.run && x.run.running) x.run.cancel = "Case deleted.";
@@ -1056,7 +1102,7 @@ document.addEventListener("click", async (e) => {
   const t = e.target.closest("button, [data-close]");
   if (!t) return;
   if (t.hasAttribute("data-close")) { if (t.closest("#sourceModal")) closeSource(); else t.closest(".modal").hidden = true; return; }
-  if (t.dataset.src) { openSource(t.dataset.src, t.dataset.page, t.dataset.quote); return; }
+  if (t.dataset.src) { openSource(t.dataset.src, t.dataset.page, t.dataset.quote || (t.dataset.ctx ? quoteFor(cur(), t.dataset.src, t.dataset.page, t.dataset.ctx) : "")); return; }
   if (t.dataset.pagesel) {
     if (t.closest("#srcBody")) { openSource(t.dataset.doc, t.dataset.pagesel, ""); return; }
     srcDocSel = { field: selectedField, doc: t.dataset.doc, page: t.dataset.pagesel, quote: "" }; render(); return;
