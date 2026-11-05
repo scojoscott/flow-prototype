@@ -302,7 +302,7 @@ const conditions = { conditions: [
   await page.waitForTimeout(1000);
   await page.waitForFunction(() => { const c = cases.find((x) => x.source); return c.docs.length === 4 && c.memo && !c.run.running; }, null, { timeout: 20000 });
   console.log("After reply:", await page.evaluate(() => { const c = cases.find((x) => x.source); return [c.docs.length + " docs", (c.chase.replies || []).length + " replies", c.chase.sent.length + " sent"].join(" | "); }));
-  await page.evaluate(() => { const c = cases.find((x) => x.source); currentId = c.id; view = "case"; currentTab = "memo"; render(); });
+  await page.evaluate(() => { const c = cases.find((x) => x.source); currentId = c.id; view = "case"; currentTab = "comms"; render(); });
   await page.click('button[data-act="chase-remind"]');
   await page.click('button[data-act="chase-remind"]');
   console.log("Flag RM:", await page.evaluate(() => cases.find((x) => x.source).chase.flagRM), "GAS calls:", gas.calls.join(","));
