@@ -230,7 +230,7 @@ table.t tr.group td { background: var(--surface); font-weight: 800; font-size: 1
   <span class="pill-provider" id="providerPill">AI: checking</span>
   <button class="btn-top" id="openSettings" type="button">Settings</button>
 </header>
-<div class="notice"><strong>Prototype.</strong> Use made-up or anonymised deal packs only. Documents are sent to the AI provider shown above. The agents prepare the case; a person makes every credit decision.</div>
+<div class="notice"><strong>Prototype.</strong> Use made-up or anonymised deal packs only. Documents are sent to the AI provider shown above.</div>
 
 <div class="shell">
   <aside>
@@ -841,7 +841,7 @@ function computeChecks(c) {
   if (L == null) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: "-", outcome: "Unclear", why: missing("loan amount") });
   else if (L > P.maxLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Above the £10m cap, so outside appetite.` });
   else if (L < P.minLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Below the £250,000 minimum.` });
-  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: "Within the lending range. The Underwriter decides." });
+  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: "Within the lending range." });
 
   // Term
   const maxT = amort ? P.maxTermAmort : P.maxTermIO;
@@ -971,10 +971,10 @@ function computeRecommendation(c) {
   c.judgements.filter((k) => k.outcome === "Unclear").forEach((k) => reasons.push({ text: `To review: ${k.area}, ${k.explanation}`, ref: k.id }));
 
   let kind, label;
-  if (core.length) { kind = "decline"; label = "Decline (outside appetite)"; }
-  else if (missing.length || outOfDate.length || unclear.length) { kind = "more"; label = "Request more information"; }
-  else if (exceptions.length) { kind = "escalate"; label = "Policy exception (Underwriter to justify)"; }
-  else { kind = "approve"; label = "Approve (within appetite)"; }
+  if (core.length) { kind = "decline"; label = "Decline: outside appetite"; }
+  else if (missing.length || outOfDate.length || unclear.length) { kind = "more"; label = "More information needed"; }
+  else if (exceptions.length) { kind = "escalate"; label = "Approve with a policy exception"; }
+  else { kind = "approve"; label = "Approve"; }
   const L = num(c, "loan_amount");
   let approver;
   if (L != null && L > POLICY.maxLoan) approver = "Outside appetite: decline";
@@ -993,7 +993,7 @@ const MEMO_SECTIONS = [
 ];
 function systemSections(c) {
   const pol = c.checks.concat(c.judgements).map((k) => `- ${k.area} (${k.clause}): ${k.outcome}. ${k.type === "Calculated" ? k.why : k.explanation}${k.source && k.source.doc ? ` [${k.source.doc} p${k.source.page || 1}]` : ""}`).join("\n");
-  const rec = `Suggested: ${c.rec.label}. Required approver: ${c.rec.approver}.\n\nReasons, most important first:\n\n` + (c.rec.reasons.length ? c.rec.reasons.map((r) => "- " + r.text).join("\n") : "- All provisions pass and no material issues were found.") + `\n\nThis is the system's suggestion. The approver makes the decision and records the rationale.`;
+  const rec = `Recommendation: ${c.rec.label}.\n\nWhy, most important first:\n\n` + (c.rec.reasons.length ? c.rec.reasons.map((r) => "- " + r.text).join("\n") : "- All provisions pass and no material issues were found.");
   return {
     external: "Companies House, Land Registry and credit bureau checks are not connected in this prototype. In the product, Companies House is checked live and Land Registry and bureau results are mocked for the MVP.",
     policy: `Assessed against the ${POLICY.name} (${POLICY.version}). Numeric limits are calculated, not judged by the AI.\n\n${pol}`,
@@ -1366,7 +1366,7 @@ function renderSummary(c) {
   const r = c.rec;
   const rec = `<div class="rec ${r.kind}"><div class="title"><span class="label">Suggested by the agents</span></div><div class="title"><b>${esc(r.label)}</b><span class="chip status">Approver: ${esc(r.approver)}</span></div>
     <ol>${r.reasons.slice(0, 8).map((x) => `<li>${esc(x.text)}</li>`).join("") || "<li>All provisions pass and no material issues were found.</li>"}</ol>
-    <p class="small">${r.complete ? "Complete" : "Incomplete"} and ${r.consistent ? "consistent" : "inconsistent"}. This is a suggestion; the approver decides. <button class="btn link" type="button" data-tab="decision">Go to decision</button></p></div>`;
+    <p class="small">${r.complete ? "Complete" : "Incomplete"} and ${r.consistent ? "consistent" : "inconsistent"}. <button class="btn link" type="button" data-tab="decision">Go to decision</button></p></div>`;
   const flags = c.consistency.length ? `<div class="card"><h2>Consistency flags</h2>${c.consistency.map((x) => `<div class="flagrow"><b>${esc(FIELD[x.key] ? FIELD[x.key].label : "Rent")}</b><span>${esc(x.text)}</span>${x.cands ? `<span>${x.cands.map((k) => k.doc ? refChip(k.doc, k.page, k.quote) : "").join(" ")}</span>` : ""}</div>`).join("")}</div>` : "";
   const req = c.brokerRequest ? `<div class="card"><h2>Draft request to the broker</h2><p class="hint">Drafted by the memo agent. Edit, then copy it into your email. Nothing is sent from here.</p><div class="field"><textarea id="brokerReq" aria-label="Draft request to the broker">${esc(c.brokerRequest)}</textarea></div><div class="row"><button class="btn" type="button" data-act="copy-req">Copy email</button><button class="btn" type="button" data-act="log-req">Mark as sent to broker</button></div></div>` : "";
   return `<div class="grid2"><div class="panel">${rec}${flags}${req}</div><div class="panel">${renderRun(c)}${docs}</div></div>`;
