@@ -188,6 +188,22 @@ table.t tr.group td { background: var(--surface); font-weight: 700; font-size: 1
 .memocard .memo-body { max-width: none; font-size: 14.5px; line-height: 1.6; text-align: justify; hyphens: auto; }
 .memocard .memo-body li { text-align: justify; }
 .sendcredit { border-color: var(--accent); }
+.inboxbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+.inboxbar .grow { flex: 1; }
+.inboxgrid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 16px; }
+@media (max-width: 900px) { .inboxgrid { grid-template-columns: 1fr; } }
+.thrlist { display: grid; gap: 8px; }
+.thr { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); padding: 10px 12px; font: inherit; cursor: pointer; }
+.thr.sel { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.thr .who { font-weight: 700; }
+.thr .when { font-size: 12px; color: var(--muted); }
+.thr .subj { grid-column: 1 / -1; font-size: 13.5px; }
+.thr .row { grid-column: 1 / -1; }
+.mails { display: grid; gap: 12px; }
+.mail { border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; display: grid; gap: 6px; }
+.mail.out { background: var(--info-soft); }
+.mail header { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.mailbody { white-space: pre-wrap; font-size: 14px; line-height: 1.55; max-height: 420px; overflow: auto; }
 .rvq { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }
 .rvq:first-of-type { border-top: 0; padding-top: 0; }
 .rvq h3 { font-size: 14px; font-weight: 700; }
@@ -2561,6 +2577,7 @@ async function openEmailAsCase(m) {
   const files = [emailFile(m)].concat((m.attachments || []).map((a) => new File([b64ToBytes(a.b64)], a.name, { type: a.type || "application/octet-stream" })));
   const prev = { id: currentId, view, tab: currentTab };
   const c = await newCaseFromFiles(files, m.subject || "Email from " + brokerName(m.from), { source: { kind: "email", id: m.id, threadId: m.threadId, from: m.from, subject: m.subject, at: m.date } });
+  c.thread = [msgRec(m)];
   audit(c, "Intake agent", `Picked up an email from ${brokerName(m.from)}: "${m.subject}" with ${(m.attachments || []).length} attachment${(m.attachments || []).length === 1 ? "" : "s"}. Case opened automatically.`, "agent");
   inboxLog(`New case ${c.ref} from ${brokerName(m.from)}: ${m.subject}`);
   if (prev.view === "case" && prev.id) { currentId = prev.id; view = "case"; currentTab = prev.tab; } else view = prev.view === "new" ? "cases" : prev.view;
@@ -2585,6 +2602,7 @@ async function pollInbox(manual) {
       if (existing) {
         existing.chase = existing.chase || { sent: [], replies: [] };
         existing.chase.awaiting = false; existing.chase.flagRM = false; existing.chase.replies.push(nowISO()); existing.chase.sinceReply = 0;
+        existing.thread = threadFor(existing).concat([msgRec(m)]);
         audit(existing, "Intake agent", `The broker replied by email with ${m.attachments.length} attachment${m.attachments.length === 1 ? "" : "s"}. Added to the case and running the agents again.`, "agent");
         inboxLog(`Reply from ${brokerName(m.from)} added to ${existing.ref} ${existing.title}`);
         toast(`Broker replied on ${existing.ref}. The agents are updating the case.`);
@@ -2616,6 +2634,7 @@ async function sendToBroker(c, kind) {
     String(c.brokerRequest || "").replace(/\[Your name\]/g, "The lending team, Demo\n(Sent by NashFlow)");
   await inboxCall("send", { threadId: c.source.threadId, body });
   c.chase = c.chase || { sent: [], replies: [] };
+  c.thread = threadFor(c).concat([{ dir: "out", at: nowISO(), from: "NashFlow (demo inbox)", to: c.source.from, subject: "Re: " + (c.source.subject || ""), body, kind, att: [] }]);
   c.chase.sent.push({ at: nowISO(), kind, body }); c.chase.awaiting = true; c.chase.sinceReply = (c.chase.sinceReply || 0) + 1;
   audit(c, "Intake agent", `${kind === "Reminder" ? "Sent a reminder" : "Emailed the broker"} asking for the missing information`, "agent");
   inboxLog(`${kind} sent to ${brokerName(c.source.from)} for ${c.ref}`);
@@ -2657,10 +2676,54 @@ function inboxStatusHtml() {
   return `${!on ? `<span class="chip c-grey">Not connected</span>` : inboxState.error ? `<span class="chip c-red">Problem</span>` : settings.inboxAuto ? `<span class="chip c-green">Checking every 30 seconds</span>` : `<span class="chip c-amber">Connected, checking only when you click</span>`}
     ${inboxState.last ? `<span class="note">Last checked ${dateOf(inboxState.last)} ${timeOf(inboxState.last)}</span>` : ""}${inboxState.error ? `<div class="errbox">${esc(inboxState.error)}</div>` : ""}`;
 }
+let inboxSettingsOpen = false, inboxSel = null;
+function msgRec(m) { return { dir: "in", at: m.date ? new Date(m.date).toISOString() : nowISO(), from: m.from, to: m.to || "", subject: m.subject || "", body: String(m.body || "").slice(0, 20000), att: (m.attachments || []).map((a) => a.name) }; }
+/* Cases opened before threads were kept: rebuild what we can from the case */
+function threadFor(c) {
+  if (c.thread) return c.thread;
+  if (!c.source) return [];
+  const d = c.docs.find((x) => /^Broker email/i.test(x.name));
+  const first = { dir: "in", at: c.source.at ? new Date(c.source.at).toISOString() : c.createdAt, from: c.source.from, subject: c.source.subject || "", body: d ? String(d.pages.join("\n")).replace(/^[\s\S]*?Subject:.*\n\n/, "") : "", att: c.docs.filter((x) => x !== d).map((x) => x.name) };
+  const ch = c.chase || { sent: [], replies: [] };
+  const rest = ch.sent.map((x) => ({ dir: "out", at: x.at, from: "NashFlow (demo inbox)", to: c.source.from, subject: "Re: " + (c.source.subject || ""), body: x.body || "", kind: x.kind, att: [] }))
+    .concat((ch.replies || []).map((at) => ({ dir: "in", at, from: c.source.from, subject: "Re: " + (c.source.subject || ""), body: "(Reply with documents. They are in the case.)", att: [] })));
+  return [first].concat(rest.sort((a, b) => (a.at < b.at ? -1 : 1)));
+}
+function inboxThreads() {
+  const t = cases.filter((c) => c.source && c.source.kind === "email").map((c) => { const th = threadFor(c); return { id: c.id, c, msgs: th, last: th.length ? th[th.length - 1].at : c.createdAt, from: c.source.from, subject: c.source.subject }; })
+    .concat((inboxState.ignored || []).map((x) => { const m = ignoredMsgs[x.id]; return { id: "ig:" + x.id, ig: x, msgs: [m ? msgRec(m) : { dir: "in", at: x.at, from: x.from, subject: x.subject, body: "", att: [] }], last: x.at, from: x.from, subject: x.subject }; }));
+  return t.sort((a, b) => (!!a.ig - !!b.ig) || (a.last < b.last ? 1 : -1));
+}
+function threadStatus(th) {
+  if (th.ig) return `<span class="chip c-grey">Not a deal</span>`;
+  const c = th.c;
+  if (c.chase && c.chase.flagRM) return `<span class="chip c-red">Broker not replying</span>`;
+  if (c.chase && c.chase.awaiting) return `<span class="chip c-amber">Waiting on broker</span>`;
+  if (!c.memo) return `<span class="chip c-amber">Agents reading</span>`;
+  return `<span class="chip c-blue">${esc(STAGES[stageOf(c)] || c.status)}</span>`;
+}
 function renderInbox() {
+  const threads = inboxThreads();
+  if (!threads.some((x) => x.id === inboxSel)) inboxSel = threads[0] ? threads[0].id : null;
+  const sel = threads.find((x) => x.id === inboxSel);
+  const list = threads.length ? threads.map((th) => `<button type="button" class="thr ${th.id === inboxSel ? "sel" : ""}" data-act="inbox-sel" data-id="${esc(th.id)}"><span class="who">${esc(brokerName(th.from))}</span><span class="when">${dateOf(th.last)} ${timeOf(th.last)}</span><span class="subj">${esc(th.subject || "(no subject)")}</span><span class="row">${threadStatus(th)}${th.c ? `<span class="note">${esc(th.c.ref)}</span>` : ""}${th.msgs.length > 1 ? `<span class="note">${th.msgs.length} emails</span>` : ""}</span></button>`).join("")
+    : `<p class="hint">No deal emails yet. When a broker emails the demo inbox, the thread appears here and the intake agent opens a case.</p>`;
+  const view = sel ? `<div class="card"><div class="cardhead"><h2>${esc(sel.subject || "(no subject)")}</h2>${threadStatus(sel)}</div>
+      ${sel.ig ? `<p class="hint">The intake agent decided this is not a deal: ${esc(sel.ig.reason || "")}</p>` : `<p class="hint">Case ${esc(sel.c.ref)}, ${esc(sel.c.title)}.${sel.c.chase && sel.c.chase.awaiting ? " NashFlow has asked the broker for missing information and is waiting for a reply." : ""}</p>`}
+      <div class="row">${sel.c ? `<button class="btn primary small" type="button" data-case="${sel.c.id}">Open case</button><button class="btn small" type="button" data-case="${sel.c.id}" data-opentab="comms">See follow-ups</button>` : ignoredMsgs[sel.ig.id] ? `<button class="btn primary small" type="button" data-act="inbox-open" data-id="${esc(sel.ig.id)}">Open as a case</button>` : ""}</div>
+      <div class="mails">${sel.msgs.map((m) => `<article class="mail ${m.dir === "out" ? "out" : ""}"><header><b>${esc(m.dir === "out" ? "NashFlow, for the lending team" : brokerName(m.from))}</b><span class="note">${dateOf(m.at)} ${timeOf(m.at)}</span>${m.dir === "out" ? `<span class="chip c-grey">${esc(m.kind === "Reminder" ? "Automatic reminder" : "Sent by NashFlow")}</span>` : ""}</header>
+        <div class="note">To: ${esc(m.dir === "out" ? brokerName(m.to) : m.to || "Deals inbox")}</div>
+        <div class="mailbody">${esc(m.body || "").trim() || '<span class="note">(No message text)</span>'}</div>
+        ${m.att && m.att.length ? `<div class="row">${m.att.map((a) => `<span class="chip c-grey">${esc(a)}</span>`).join("")}</div>` : ""}</article>`).join("")}</div></div>` : "";
+  return pageHead("Deals inbox", "Deals inbox") + `
+    <div class="inboxbar"><div id="inboxStatus" class="row">${inboxStatusHtml()}</div><span class="grow"></span><button class="btn small" type="button" data-act="inbox-check">Check now</button><button class="btn small" type="button" data-act="inbox-settings" aria-expanded="${inboxSettingsOpen}">${inboxSettingsOpen ? "Hide inbox settings" : "Inbox settings"}</button></div>
+    ${inboxSettingsOpen ? renderInboxSettings() : ""}
+    <div class="inboxgrid"><div class="thrlist">${list}</div><div>${view}</div></div>`;
+}
+function renderInboxSettings() {
   const ck = (id, on, label, desc) => `<label class="choice"><input type="checkbox" id="${id}" ${on ? "checked" : ""}><span><b>${label}</b><small>${desc}</small></span></label>`;
-  return pageHead("Deals inbox", "Deals inbox", "NashFlow reads a deals inbox. When a broker emails a deal pack, the intake agent opens a case and runs the agents with no clicks. If anything is missing, NashFlow emails the broker, reminds after 2 working days, and flags the RM after 2 unanswered emails.") +
-    `<div class="proto"><b>Demo inbox.</b> This prototype uses a Gmail account set up for demos, through a small Google Apps Script. Send it made-up or anonymised packs only. It works on the hosted page and the downloaded copy, not inside the claude.ai link.</div>
+  return `<p class="intro">NashFlow reads a deals inbox. When a broker emails a deal pack, the intake agent opens a case and runs the agents with no clicks. If anything is missing, NashFlow emails the broker, reminds after 2 working days, and flags the RM after 2 unanswered emails.</p>
+    <div class="proto"><b>Demo inbox.</b> This prototype uses a Gmail account set up for demos, through a small Google Apps Script. Send it made-up or anonymised packs only. It works on the hosted page and the downloaded copy, not inside the claude.ai link.</div>
     <div class="grid2 even"><div class="stack">
       <div class="card"><div class="cardhead"><h2>Connection</h2></div><div id="inboxStatus" class="row">${inboxStatusHtml()}</div>
         <div class="cfg"><label for="ibUrl">Web app address (ends in /exec)</label><input id="ibUrl" type="url" value="${esc(settings.inboxUrl || "")}" placeholder="https://script.google.com/macros/s/.../exec"><label for="ibKey">Key (the same phrase as in the script)</label><input id="ibKey" type="password" autocomplete="off" value="${esc(settings.inboxKey || "")}"></div>
@@ -2718,13 +2781,15 @@ document.addEventListener("click", async (e) => {
   if (t.dataset.act && t.dataset.act.startsWith("inbox-")) {
     const a = t.dataset.act;
     if (a === "inbox-save" || a === "inbox-test" || a === "inbox-check") {
-      settings.inboxUrl = ($("#ibUrl").value || "").trim(); settings.inboxKey = ($("#ibKey").value || "").trim();
-      settings.inboxAuto = $("#ibAuto").checked; settings.chaseAuto = $("#ibChase").checked; store("nashflow.settings", settings);
+      if ($("#ibUrl")) { settings.inboxUrl = ($("#ibUrl").value || "").trim(); settings.inboxKey = ($("#ibKey").value || "").trim();
+        settings.inboxAuto = $("#ibAuto").checked; settings.chaseAuto = $("#ibChase").checked; store("nashflow.settings", settings); }
     }
     if (a === "inbox-save") { toast("Inbox settings saved"); render(); }
     else if (a === "inbox-test") { try { const r = await inboxCall("ping"); inboxState.error = ""; toast("Connected to " + (r.inbox || "the inbox")); inboxLog("Connected to " + (r.inbox || "the inbox")); } catch (err) { inboxState.error = err.message; toast(err.message); } store("nashflow.inbox.state", inboxState); render(); }
     else if (a === "inbox-check") { await pollInbox(true); render(); }
     else if (a === "inbox-copy") copyText(INBOX_SCRIPT, "Script copied");
+    else if (a === "inbox-settings") { inboxSettingsOpen = !inboxSettingsOpen; render(); }
+    else if (a === "inbox-sel") { inboxSel = t.dataset.id; render(); }
     else if (a === "inbox-open") { const m = ignoredMsgs[t.dataset.id]; if (m) { delete ignoredMsgs[m.id]; inboxState.ignored = (inboxState.ignored || []).filter((x) => x.id !== m.id); store("nashflow.inbox.state", inboxState); await openEmailAsCase(m); } }
     return;
   }
