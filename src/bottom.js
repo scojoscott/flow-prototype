@@ -854,7 +854,7 @@ function renderSettings() {
 /* ------------------------------------------------------------------ deals inbox (Gmail demo inbox via Google Apps Script) */
 const INBOX_SCRIPT = /*__GAS__*/"";
 /* Built-in demo inbox, so everyone who opens the page sees the same emails. Demo use only: the page is public, so anyone who reads it can use this inbox. */
-const DEMO_INBOX = { url: "", key: "" };
+const DEMO_INBOX = { url: "https://script.google.com/macros/s/AKfycbyG7UV-PqSRIcpCq5RJ-fd63eKydUqUamHiM0vNCRappOT0-6XHNIGtYoEJWqhJQFlm/exec", key: "brokerflowgetsitdone" };
 if (DEMO_INBOX.url && !settings.inboxUrl) { settings.inboxUrl = DEMO_INBOX.url; settings.inboxKey = DEMO_INBOX.key; if (settings.inboxAuto == null) settings.inboxAuto = true; }
 let inboxBusy = false;
 let inboxState = Object.assign({ last: null, error: "", log: [] }, load("nashflow.inbox.state", {}));

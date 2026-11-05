@@ -26,6 +26,8 @@ Keys and cases are saved in your own browser only. The same page also runs at th
 
 Under **Administration, Deals inbox**, the app can read a Gmail account set up for demos. When a broker emails a pack to it, a case opens and the agents run with no clicks. Broker replies in the same thread are added to the case. With automatic follow-up on, NashFlow emails the broker for anything missing, reminds after 2 working days and flags the RM after 2 unanswered emails. The Google Apps Script and set-up steps are in `gmail-intake/Code.gs` and on the Deals inbox page. It works on the hosted site and the downloaded copy, not inside the claude.ai link. Send it made-up or anonymised packs only.
 
+The demo inbox is built into the page (`DEMO_INBOX` in `src/bottom.js`), so everyone who opens the hosted site is connected to it and sees the same emails. Each browser remembers which emails it has picked up and makes its own cases. The site is public, so anyone who reads the page can use that inbox: demo use only. Change the key in the script and in `DEMO_INBOX` before sharing the demo more widely. Automatic follow-up emails are off unless switched on in that browser.
+
 A complete demo pack is in `demo-pack/`. Three test packs (clean, incomplete, inconsistent) are built into the app under New case.
 
 ## Making changes
