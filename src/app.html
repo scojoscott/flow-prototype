@@ -536,6 +536,7 @@ async function readFile(file) {
   const name = file.name; const lower = name.toLowerCase();
   const doc = { name, pages: [], images: [] };
   if (lower.endsWith(".pdf") || file.type === "application/pdf") {
+    doc.kind = "pdf";
     const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(await file.arrayBuffer()) }).promise;
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
@@ -551,21 +552,43 @@ async function readFile(file) {
       }
     }
   } else if (lower.endsWith(".docx")) {
+    doc.kind = "word";
     await loadScript("https://cdnjs.cloudflare.com/ajax/libs/mammoth/1.6.0/mammoth.browser.min.js");
     const r = await window.mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
     doc.pages.push(r.value.trim());
   } else if (/\.(xlsx|xls)$/.test(lower)) {
     await loadScript("https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js");
+    doc.kind = "sheet";
     const wb = window.XLSX.read(new Uint8Array(await file.arrayBuffer()), { type: "array" });
     wb.SheetNames.forEach((sn) => doc.pages.push("Sheet: " + sn + "\n" + window.XLSX.utils.sheet_to_csv(wb.Sheets[sn])));
   } else if (/\.(png|jpe?g|webp)$/.test(lower) || (file.type || "").startsWith("image/")) {
     const b64 = await new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(String(fr.result).split(",")[1]); fr.readAsDataURL(file); });
+    doc.kind = "image";
     doc.images.push({ page: 1, mime: file.type || "image/jpeg", b64 });
     doc.pages.push("[Image. Read from the image.]");
   } else {
     doc.pages.push((await file.text()).trim());
   }
   return doc;
+}
+
+
+/* ------------------------------------------------------------------ original files (IndexedDB, this browser only) */
+const fileStore = (() => {
+  let dbp = null;
+  const db = () => dbp || (dbp = new Promise((res, rej) => { try { const r = indexedDB.open("nashflow.files", 1); r.onupgradeneeded = () => r.result.createObjectStore("files"); r.onsuccess = () => res(r.result); r.onerror = () => rej(r.error); } catch (e) { rej(e); } }));
+  const tx = async (mode, fn) => { const d = await db(); return new Promise((res, rej) => { const t = d.transaction("files", mode); const q = fn(t.objectStore("files")); t.oncomplete = () => res(q && q.result); t.onerror = () => rej(t.error); }); };
+  return {
+    put: (k, v) => tx("readwrite", (s) => s.put(v, k)).catch(() => null),
+    get: (k) => tx("readonly", (s) => s.get(k)).catch(() => null),
+    delCase: (caseId) => tx("readwrite", (s) => s.delete(IDBKeyRange.bound(caseId + "/", caseId + "/￿"))).catch(() => null),
+  };
+})();
+const pdfCache = {}; // "case/doc" -> pdf.js document promise
+function pdfFor(caseId, docId) {
+  const k = caseId + "/" + docId;
+  if (!pdfCache[k]) pdfCache[k] = fileStore.get(k).then((f) => (f && f.bytes ? window.pdfjsLib.getDocument({ data: new Uint8Array(f.bytes) }).promise : null)).catch(() => null);
+  return pdfCache[k];
 }
 
 /* ------------------------------------------------------------------ state */
@@ -578,10 +601,19 @@ function save() {
   store("nashflow.current", currentId);
 }
 const cur = () => cases.find((c) => c.id === currentId);
+/* Roles (requirements v1.1): the RM prepares the case, the Underwriter decides every case up to £10m. No Credit Committee. */
+const ROLES = ["Relationship Manager", "Underwriter"];
+let currentRole = load("nashflow.role", "Relationship Manager");
+if (!ROLES.includes(currentRole)) currentRole = "Relationship Manager";
+const actor = () => currentRole;
+const STAGES = { rm: "With RM", uw: "With Underwriter", returned: "Returned to RM", approved: "Approved", declined: "Declined" };
+function stageOf(c) { return c.stage || (c.decision ? (c.decision.choice === "Decline" ? "declined" : "approved") : "rm"); }
+function waitingOn(c) { const s = stageOf(c); return s === "uw" ? "Underwriter" : s === "rm" || s === "returned" ? "Relationship Manager" : null; }
 function audit(c, who, what, kind = "human") { c.audit.push({ at: nowISO(), who, what, kind }); }
 
-async function newCaseFromFiles(files, title) {
+async function newCaseFromFiles(files, title, extra) {
   const c = { id: uid(), createdAt: nowISO(), title: title || "New case", status: "New (being read by agents)", docs: [], audit: [], run: null, fields: null, tenants: [], checks: [], consistency: [], judgements: [], memo: null, rec: null, decision: null };
+  if (extra) Object.assign(c, extra);
   cases.unshift(c); currentId = c.id; currentTab = "summary";
   memImages[c.id] = [];
   render();
@@ -591,6 +623,7 @@ async function newCaseFromFiles(files, title) {
     try {
       const d = await readFile(f);
       d.id = "D" + i;
+      if (d.kind === "pdf") await fileStore.put(c.id + "/" + d.id, { name: f.name, bytes: await f.arrayBuffer() });
       d.images.forEach((im) => memImages[c.id].push(Object.assign({ doc: d.id }, im)));
       d.imagePages = d.images.map((im) => im.page);
       delete d.images;
@@ -602,6 +635,26 @@ async function newCaseFromFiles(files, title) {
   }
   save(); render();
   runAgents(c);
+  return c;
+}
+/* Add documents to an existing case (for example a broker's reply) and run the agents again */
+async function addFilesToCase(c, files, who) {
+  memImages[c.id] = memImages[c.id] || [];
+  let i = c.docs.length;
+  for (const f of files) {
+    i++;
+    try {
+      const d = await readFile(f);
+      d.id = "D" + i;
+      if (d.kind === "pdf") await fileStore.put(c.id + "/" + d.id, { name: f.name, bytes: await f.arrayBuffer() });
+      d.images.forEach((im) => memImages[c.id].push(Object.assign({ doc: d.id }, im)));
+      d.imagePages = d.images.map((im) => im.page); delete d.images;
+      c.docs.push(d);
+      audit(c, who || "Intake agent", `Read ${d.id} "${d.name}" (${d.pages.length} page${d.pages.length > 1 ? "s" : ""})`, "agent");
+    } catch (e) { audit(c, who || "Intake agent", `Could not read "${f.name}": ${e.message}`, "agent"); }
+  }
+  save(); render();
+  return runAgents(c);
 }
 
 /* ------------------------------------------------------------------ prompts */
@@ -620,6 +673,7 @@ Rules:
 - If the same field appears in more than one document, put the other occurrences in "others", even when they agree. This is used to check consistency. Include the broker email's figures as well as the formal documents' figures.
 - annual_rent is the current passing rent actually payable, not estimated rental value of vacant space.
 - property_country is inferred from the address and postcode.
+- borrower_name and company_number are the legal borrowing company. If the broker email or application form does not give them, take them from the accounts (the company name and registered number on the cover, directors' report or balance sheet), or from a Companies House printout. Always list what the accounts say in "others" too, so they can be compared.
 - A broker's rough figure ("around", "about", "we think") is Not confident unless a formal document confirms it. value_basis is "Broker estimate" when there is no valuation report.
 - Classify each document as one of: Broker email, Application form, Valuation report, Tenancy schedule, Lease, Accounts, Sales particulars, Companies House, EPC certificate, Redemption statement, Sponsor statement, Other. Give its date if shown.
 - List every tenant from a tenancy schedule or lease with annual rent (number), lease_end and break_date (YYYY-MM-DD, or null with a note if not clear). Exclude vacant units.
@@ -645,7 +699,7 @@ function memoPrompt(c) {
   FIELDS.forEach((f) => { const x = c.fields[f.key]; fieldsOut[f.key] = { state: x.state, value: x.value, source: x.source ? `[${x.source.doc} p${x.source.page}]` : null }; });
   const checks = c.checks.map((k) => ({ area: k.area, rule: k.rule, result: k.value, outcome: k.outcome, flag: k.flag, why: k.why }));
   const sens = (c.analysis || []).map((a) => ({ measure: a.label, value: a.value, comment: a.note }));
-  return `You are the memo agent in NashFlow, a commercial property lending tool for a UK specialist lender. Write as an experienced UK commercial real estate credit analyst preparing a credit paper for an Underwriter or Credit Committee. The agents assist; a person decides.
+  return `You are the memo agent in NashFlow, a commercial property lending tool for a UK specialist lender. Write as an experienced UK commercial real estate credit analyst preparing a credit paper for the Underwriter, who approves every case. The agents assist; a person decides.
 
 How to write:
 - The reader is a credit professional. Be analytical, not descriptive: after each fact, say what it means for the credit (security, income, cover, sponsor, exit). No padding, no marketing language.
@@ -664,7 +718,7 @@ ${JUDGEMENT_AREAS.map((j) => `   - ${j.area}: ${j.rule}`).join("\n")}
    - property: location and micro-location, type and specification, age and condition, tenure, EPC and MEES implications, alternative uses, and how liquid the asset is as security.
    - valuation: valuer, date and basis, market value, capital value per sq ft, passing rent against ERV and the reversion, yield (the valuer's if given, otherwise the calculated implied yield), comparables if given and whether the value looks supported, the valuer's view on suitability, and reliance points (age of the valuation, who instructed it, need for a lender-instructed RICS valuation).
    - income: one "- " line per tenant (tenant, rent and share of total, lease end and break, covenant comment from evidence only), then WAULT to expiry and to break, rent at risk from lease events within the loan term, concentration, vacancy, arrears and reversion potential.
-   - financial_analysis: LTV, ICR at the pay rate and under stress, DSCR if amortising, debt yield and the sensitivities, with headroom against policy, and what the accounts show. One or two paragraphs, then "- " lines for each red or amber flag with the reason.
+   - financial_analysis: LTV, ICR at the pay rate and under stress, DSCR if amortising, debt yield and the sensitivities, with headroom against policy, and what the accounts show using the FINANCIAL SPREAD (income and profit trend, interest cover from the accounts, gearing, cash, guarantor net worth; mark its ratios as (calculated)). One or two paragraphs, then "- " lines for each red or amber flag with the reason.
    - exit: how the loan is repaid at maturity (refinance or sale), whether the asset should be refinanceable then given lease events before maturity and the LTV and ICR at maturity, and what could stop it.
    - risks: 5 to 8 "- Risk: ... Mitigant: ..." lines, most important first, specific to this deal.
    - covenants: proposed financial covenants using the SENSITIVITIES (LTV and ICR levels with headroom), then information undertakings (annual accounts, quarterly rent roll, lender's right to revalue). Say the levels are proposed.
@@ -687,6 +741,9 @@ ${JSON.stringify(checks, null, 1)}
 
 SENSITIVITIES (calculated)
 ${JSON.stringify(sens, null, 1)}
+
+FINANCIAL SPREAD (from the financial analysis agent; ratios calculated in code)
+${finBlock(c)}
 
 CONSISTENCY FLAGS
 ${JSON.stringify(c.consistency.map((f) => f.text))}
@@ -714,7 +771,9 @@ function normaliseExtraction(c, r) {
       for (const t of pr) { const hit = cands.find((k) => k.docType === t); if (hit) { used = hit; break; } }
     }
     if (used && state === "Not present") state = "Found";
-    const field = { key: f.key, state, value: used ? (NUMERIC.has(f.key) ? used.num : used.value) : null, source: used && used.doc ? { doc: used.doc, page: used.page || 1, quote: used.quote || "" } : null, note: raw.note || "", candidates: cands };
+    const fromBroker = cands.some((k) => k.docType === "Broker email" || k.docType === "Application form");
+    const backfill = (f.key === "borrower_name" || f.key === "company_number") && used && !fromBroker && ["Accounts", "Companies House"].includes(used.docType);
+    const field = { key: f.key, state, value: used ? (NUMERIC.has(f.key) ? used.num : used.value) : null, source: used && used.doc ? { doc: used.doc, page: used.page || 1, quote: used.quote || "" } : null, note: backfill ? `Not in the broker's submission. Taken from the ${used.docType === "Accounts" ? "accounts" : "Companies House record"}.` : raw.note || "", backfilled: backfill ? used.docType : null, candidates: cands };
     if (NUMERIC.has(f.key) && used && used.num != null) {
       const tol = f.type === "money" ? 0.01 : 0;
       const diff = cands.filter((k) => k.num != null && Math.abs(k.num - used.num) > Math.abs(used.num) * tol + 1e-9);
@@ -752,7 +811,7 @@ function computeChecks(c) {
   if (L == null) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: "-", outcome: "Unclear", why: missing("loan amount") });
   else if (L > P.maxLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Above the £10m cap, so outside appetite.` });
   else if (L < P.minLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Below the £250,000 minimum.` });
-  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: `Within the lending range.${L > P.uwLimit ? " Over £1m, so a Credit Committee decision." : ""}` });
+  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: "Within the lending range. The Underwriter decides." });
 
   // Term
   const maxT = amort ? P.maxTermAmort : P.maxTermIO;
@@ -884,14 +943,13 @@ function computeRecommendation(c) {
   let kind, label;
   if (core.length) { kind = "decline"; label = "Decline (outside appetite)"; }
   else if (missing.length || outOfDate.length || unclear.length) { kind = "more"; label = "Request more information"; }
-  else if (exceptions.length) { kind = "escalate"; label = "Escalate (policy exception)"; }
+  else if (exceptions.length) { kind = "escalate"; label = "Policy exception (Underwriter to justify)"; }
   else { kind = "approve"; label = "Approve (within appetite)"; }
   const L = num(c, "loan_amount");
   let approver;
   if (L != null && L > POLICY.maxLoan) approver = "Outside appetite: decline";
-  else if (exceptions.length) approver = "Credit Committee (policy exception)";
-  else if (L != null && L > POLICY.uwLimit) approver = "Credit Committee (over £1m)";
-  else approver = "Underwriter (up to £1m)";
+  else if (exceptions.length) approver = "Underwriter (policy exception, reason required)";
+  else approver = "Underwriter";
   const complete = !missing.length; const consistent = !c.consistency.length;
   c.rec = { kind, label, reasons, approver, complete, consistent, exceptions: exceptions.map((k) => k.area), at: nowISO() };
 }
@@ -919,6 +977,148 @@ function refreshSystemSections(c) {
   Object.keys(s).forEach((k) => { const sec = c.memo[k]; if (!sec || sec.by === "System") c.memo[k] = { text: s[k], by: "System", at: nowISO() }; });
 }
 
+/* ------------------------------------------------------------------ conditions agent */
+/* Base set of standard conditions for a commercial property investment loan (illustrative, not from a lender) */
+const BASE_CONDITIONS = [
+  ["Condition precedent", "First legal charge over the property"],
+  ["Condition precedent", "Debenture from the borrower"],
+  ["Condition precedent", "Satisfactory valuation addressed to the lender, dated within 3 months of drawdown"],
+  ["Condition precedent", "Satisfactory report on title from the lender's solicitors"],
+  ["Condition precedent", "Buildings insurance with the lender's interest noted"],
+  ["Condition precedent", "Redemption statement from the existing lender and evidence of repayment at completion"],
+  ["Condition precedent", "Certified copies of all occupational leases"],
+  ["Condition precedent", "Rent account or bank statements evidencing the passing rent"],
+  ["Condition precedent", "Personal guarantees from the directors, with independent legal advice"],
+  ["Condition precedent", "Know your customer and anti-money laundering checks on the borrower, directors and persons with significant control"],
+  ["Condition precedent", "Board minutes approving the borrowing"],
+  ["Condition precedent", "Current EPC for each unit at E or better"],
+  ["Condition precedent", "Environmental desktop report"],
+  ["Condition precedent", "Evidence of the source of the borrower's equity contribution"],
+  ["Condition precedent", "Signed facility letter"],
+  ["Financial covenant", "Loan to value not to exceed the agreed covenant level, tested annually"],
+  ["Financial covenant", "Interest cover not below the agreed covenant level, tested quarterly"],
+  ["Financial covenant", "Debt service cover not below the agreed level, tested quarterly"],
+  ["Information covenant", "Annual audited or accountant-prepared accounts within 9 months of year end"],
+  ["Information covenant", "Quarterly rent roll and arrears report"],
+  ["Information covenant", "Notify the lender of any lease expiry, break notice or tenant insolvency"],
+  ["Undertaking", "No further charges over the property without consent"],
+  ["Undertaking", "No change of ownership or control of the borrower without consent"],
+  ["Undertaking", "No new lease, surrender or variation of a material lease without consent"],
+  ["Undertaking", "Maintain the property in good repair"],
+  ["Condition subsequent", "Re-letting of the vacant unit within an agreed period"],
+  ["Condition subsequent", "Completion of lease renewal for a tenant holding over within an agreed period"],
+  ["Condition subsequent", "EPC improvement plan for units below C before the date set by the lender"],
+  ["Condition subsequent", "Cash sweep or rent deposit if a major tenant serves a break notice"],
+  ["Condition subsequent", "Updated valuation at the lender's request, at the borrower's cost"],
+];
+function conditionsPrompt(c) {
+  const F = c.fields; const val = (k) => (F[k] && F[k].value != null && F[k].value !== "" ? F[k].value : "not known");
+  const facts = ["purpose", "loan_amount", "loan_term_years", "repayment_basis", "borrower_name", "directors", "property_address", "property_type", "tenure", "property_value", "epc_rating", "annual_rent", "existing_debt"].map((k) => `- ${FIELD[k].label}: ${val(k)}`).join("\n");
+  const flags = c.checks.concat(c.judgements).filter((k) => k.outcome !== "Pass" || k.flag).map((k) => `- ${k.area}: ${k.outcome}. ${k.why || k.explanation || ""}`).join("\n") || "- None";
+  const tenants = (c.tenants || []).map((t) => `- ${t.name}: ${money(t.annual_rent)}, lease end ${t.lease_end || "not clear"}${t.break_date ? ", break " + t.break_date : ""}${t.note ? " (" + t.note + ")" : ""}`).join("\n") || "- None listed";
+  return `You are the conditions agent in NashFlow, a commercial property lending tool for a UK specialist lender. Propose the conditions for this loan for the Underwriter to accept or reject. The Underwriter decides; you suggest.
+
+Use the lender's base set below where it applies to this case, and add case-specific conditions for the risks in this case (for example a vacant unit, a tenant holding over, a short WAULT, a low EPC, a policy exception, a mismatch in the figures). Do not include base conditions that do not apply (for example a redemption statement on a purchase). Keep each condition to one sentence in plain UK English. For covenants, use the proposed levels: LTV ${COVENANTS.ltv}% maximum, ICR ${COVENANTS.icr}x minimum.
+
+Base set:
+${BASE_CONDITIONS.map(([t, x], i) => `B${i + 1}. [${t}] ${x}`).join("\n")}
+
+Case facts:
+${facts}
+
+Tenants:
+${tenants}
+
+Policy flags and judgement areas:
+${flags}
+
+Recommendation: ${c.rec ? c.rec.label : "not yet"}
+
+Reply with only this JSON:
+{"conditions": [{"type": "Condition precedent | Condition subsequent | Financial covenant | Information covenant | Undertaking", "text": "...", "from": "B3 or Case specific", "reason": "why it applies to this case, one short sentence"}]}`;
+}
+async function runConditions(c) {
+  c.conditionsRun = { running: true, error: null }; render();
+  try {
+    const r = await askAI(conditionsPrompt(c), [], "conditions");
+    c.conditions = (r.conditions || []).filter((x) => x && x.text).map((x, i) => ({ id: "K" + (i + 1), type: x.type || "Condition precedent", text: String(x.text), from: /^B\d+$/.test(String(x.from || "")) ? "Base set" : "Case specific", reason: x.reason || "", status: "suggested", by: "Conditions agent" }));
+    audit(c, "Conditions agent", `Suggested ${c.conditions.length} conditions (${c.conditions.filter((x) => x.from === "Base set").length} from the base set, ${c.conditions.filter((x) => x.from !== "Base set").length} case specific)`, "agent");
+    c.conditionsRun = { running: false, error: null };
+  } catch (e) {
+    c.conditionsRun = { running: false, error: e.message || String(e) };
+    audit(c, "System", "Conditions agent stopped: " + c.conditionsRun.error, "agent");
+  }
+  save(); render();
+}
+
+/* ------------------------------------------------------------------ financial analysis agent */
+const FIN_LINES = [
+  ["rental_income", "Rental income / turnover"], ["property_costs", "Property costs"], ["admin_costs", "Administrative costs"],
+  ["operating_profit", "Operating profit"], ["finance_costs", "Finance costs"], ["profit_before_tax", "Profit before tax"], ["profit_after_tax", "Profit after tax"],
+  ["investment_property", "Investment property"], ["cash", "Cash"], ["bank_debt", "Bank and other loans"], ["directors_loans", "Directors' loans"], ["net_assets", "Net assets"],
+];
+function finPrompt(c) {
+  const fin = c.docs.filter((d) => /accounts|sponsor|companies house|other/i.test(d.type || ""));
+  const docs = fin.length ? fin : c.docs;
+  const block = docs.map((d) => `=== DOCUMENT ${d.id}: "${d.name}" (${d.type || "unclassified"}) ===\n` + d.pages.map((p, i) => `--- ${d.id} page ${i + 1} ---\n${p}`).join("\n")).join("\n\n");
+  return `You are the financial analysis agent in NashFlow, a commercial property lending tool for a UK specialist lender. Spread the borrower's accounts and summarise the guarantors' statements of assets and liabilities, so a credit analyst can see the financial position. Ratios are calculated in code afterwards, so only extract figures.
+
+Rules:
+- Use only figures in the documents. Never estimate a missing figure: use null.
+- Periods: up to three years, most recent first, as shown in the accounts.
+- Give costs and finance costs as positive numbers. Numbers in pounds with no symbols or commas. Brackets mean negative in accounts, but report costs as positive.
+- For each line give the source (document id, page, and 3 to 12 words copied exactly so it can be highlighted).
+- Lines to extract where shown: ${FIN_LINES.map((l) => l[0] + " (" + l[1] + ")").join(", ")}.
+- Guarantors: for each director or guarantor with a statement of assets and liabilities, give total assets, total liabilities, net worth and liquid assets (cash and listed investments) if shown.
+- observations: 3 to 6 short points an analyst would note from the accounts (trend in income, profit, gearing, cash, related party loans, anything unusual), each with a source.
+- missing: what an analyst would still need (for example full accounts, management accounts for the current year, a bank statement, a guarantor statement).
+
+Reply with only this JSON:
+{"entity": "", "basis": "Full accounts | Abridged accounts | Management accounts | Summary", "periods": [{"label": "FY2026", "end": "YYYY-MM-DD"}],
+ "lines": [{"key": "rental_income", "values": [0, 0], "source": {"doc": "D2", "page": 1, "quote": "exact words"}}],
+ "guarantors": [{"name": "", "assets": 0, "liabilities": 0, "net_worth": 0, "liquid_assets": null, "source": {"doc": "D5", "page": 1, "quote": "exact words"}}],
+ "observations": [{"text": "", "source": {"doc": "D2", "page": 1}}],
+ "missing": [""]}
+
+DOCUMENTS
+${block}`;
+}
+function computeFinancials(c, r) {
+  const periods = (r.periods || []).slice(0, 3).map((p) => ({ label: String(p.label || p.end || ""), end: p.end || null }));
+  const n = periods.length;
+  const lines = {};
+  (r.lines || []).forEach((l) => { if (!l || !FIN_LINES.some((x) => x[0] === l.key)) return; lines[l.key] = { values: Array.from({ length: n }, (_, i) => parseNum((l.values || [])[i])), source: l.source || null }; });
+  const v = (k, i) => (lines[k] ? lines[k].values[i] : null);
+  const ratios = []; const flags = [];
+  const pct = (x) => (x == null || !isFinite(x) ? "-" : (x * 100).toFixed(1) + "%");
+  const per = (fn) => periods.map((_, i) => { try { const x = fn(i); return x == null || !isFinite(x) ? null : x; } catch (e) { return null; } });
+  const growth = per((i) => (i + 1 < n && v("rental_income", i) != null && v("rental_income", i + 1) ? v("rental_income", i) / v("rental_income", i + 1) - 1 : null));
+  ratios.push({ label: "Income growth on prior year", values: growth.map(pct) });
+  const margin = per((i) => (v("profit_before_tax", i) != null && v("rental_income", i) ? v("profit_before_tax", i) / v("rental_income", i) : null));
+  ratios.push({ label: "Profit before tax margin", values: margin.map(pct) });
+  const icr = per((i) => (v("finance_costs", i) ? ((v("operating_profit", i) != null ? v("operating_profit", i) : v("profit_before_tax", i) != null ? v("profit_before_tax", i) + v("finance_costs", i) : null)) / v("finance_costs", i) : null));
+  ratios.push({ label: "Interest cover from the accounts", values: icr.map((x) => (x == null ? "-" : x.toFixed(2) + "x")) });
+  const gear = per((i) => (v("net_assets", i) && v("bank_debt", i) != null ? v("bank_debt", i) / v("net_assets", i) : null));
+  ratios.push({ label: "Gearing (loans to net assets)", values: gear.map(pct) });
+  const ltvBook = per((i) => (v("investment_property", i) && v("bank_debt", i) != null ? v("bank_debt", i) / v("investment_property", i) : null));
+  ratios.push({ label: "Loans to book value of property", values: ltvBook.map(pct) });
+  if (growth[0] != null && growth[0] < -0.05) flags.push({ flag: "amber", text: `Income fell ${pct(-growth[0])} on the prior year (calculated).` });
+  if (margin[0] != null && margin[0] < 0) flags.push({ flag: "red", text: "Loss before tax in the latest year (calculated)." });
+  if (icr[0] != null && icr[0] < POLICY.minICR) flags.push({ flag: "amber", text: `Interest cover from the accounts is ${icr[0].toFixed(2)}x, below the ${POLICY.minICR}x policy minimum (calculated).` });
+  if (v("net_assets", 0) != null && v("net_assets", 0) < 0) flags.push({ flag: "red", text: "Negative net assets in the latest year." });
+  if (gear[0] != null && gear[0] > 1.5) flags.push({ flag: "amber", text: `Gearing of ${pct(gear[0])} in the latest year (calculated).` });
+  if (!n) flags.push({ flag: "amber", text: "No accounts figures found in the pack." });
+  const guarantors = (r.guarantors || []).filter((g) => g && g.name).map((g) => { const a = parseNum(g.assets), l = parseNum(g.liabilities); return { name: g.name, assets: a, liabilities: l, net_worth: parseNum(g.net_worth) ?? (a != null && l != null ? a - l : null), liquid: parseNum(g.liquid_assets), source: g.source || null }; });
+  c.financials = { entity: r.entity || "", basis: r.basis || "", periods, lines, ratios, flags, guarantors, observations: (r.observations || []).filter((o) => o && o.text), missing: (r.missing || []).filter(Boolean), at: nowISO() };
+}
+function finBlock(c) {
+  const f = c.financials; if (!f) return "Not available.";
+  const rows = FIN_LINES.filter(([k]) => f.lines[k]).map(([k, label]) => `- ${label}: ${f.periods.map((p, i) => `${p.label} ${f.lines[k].values[i] == null ? "n/a" : money(f.lines[k].values[i])}`).join(", ")}${f.lines[k].source ? ` [${f.lines[k].source.doc} p${f.lines[k].source.page || 1}]` : ""}`);
+  const rat = f.ratios.map((r) => `- ${r.label} (calculated): ${f.periods.map((p, i) => `${p.label} ${r.values[i]}`).join(", ")}`);
+  const g = f.guarantors.map((x) => `- ${x.name}: assets ${money(x.assets)}, liabilities ${money(x.liabilities)}, net worth ${money(x.net_worth)}${x.liquid != null ? ", liquid " + money(x.liquid) : ""}${x.source ? ` [${x.source.doc} p${x.source.page || 1}]` : ""}`);
+  return [`Entity: ${f.entity}. Basis: ${f.basis}.`, ...rows, ...rat, ...(g.length ? ["Guarantors:", ...g] : []), ...(f.flags.length ? ["Flags:", ...f.flags.map((x) => "- " + x.text)] : [])].join("\n");
+}
+
 /* ------------------------------------------------------------------ the agent run */
 async function runAgents(c, onlyMemo = false) {
   const imgs = memImages[c.id] || [];
@@ -926,6 +1126,7 @@ async function runAgents(c, onlyMemo = false) {
     { id: "intake", agent: "Intake agent", text: `Read ${c.docs.length} document${c.docs.length === 1 ? "" : "s"}`, state: "done" },
     { id: "extract", agent: "Extraction agent", text: "Classify documents and extract fields with sources", state: onlyMemo ? "done" : "todo" },
     { id: "policy", agent: "Policy agent", text: "Run calculated checks against the credit policy", state: onlyMemo ? "done" : "todo" },
+    { id: "fin", agent: "Financial analysis agent", text: "Spread the accounts and guarantor statements", state: onlyMemo ? "done" : "todo" },
     { id: "memo", agent: "Memo agent", text: "Assess judgement areas and draft the credit memo", state: "todo" },
   ];
   c.run = { steps, error: null, running: true };
@@ -949,6 +1150,17 @@ async function runAgents(c, onlyMemo = false) {
       computeRecommendation(c);
       set("policy", "done", `${c.checks.filter((k) => k.outcome === "Pass").length} pass, ${c.checks.filter((k) => k.outcome === "Fail").length} fail, ${c.checks.filter((k) => k.outcome === "Unclear").length} unclear`);
       audit(c, "Policy agent", `Ran ${c.checks.length} calculated checks against ${POLICY.name}`, "agent");
+      set("fin", "active");
+      try {
+        const fr = await askAI(finPrompt(c), [], "financials");
+        computeFinancials(c, fr);
+        set("fin", "done", `${c.financials.periods.length} year${c.financials.periods.length === 1 ? "" : "s"} spread, ${c.financials.guarantors.length} guarantor statement${c.financials.guarantors.length === 1 ? "" : "s"}, ${c.financials.flags.length} flag${c.financials.flags.length === 1 ? "" : "s"}`);
+        audit(c, "Financial analysis agent", `Spread ${c.financials.periods.length} years of accounts and ${c.financials.guarantors.length} guarantor statements; ratios calculated in code`, "agent");
+      } catch (e) {
+        c.financials = null;
+        set("fin", "error", "Skipped: " + (e.message || e));
+        audit(c, "Financial analysis agent", "Stopped, the memo continues without the spread: " + (e.message || e), "agent");
+      }
     }
     set("memo", "active");
     const m = await askAI(memoPrompt(c), [], "memo");
@@ -970,7 +1182,8 @@ async function runAgents(c, onlyMemo = false) {
     set("memo", "done", `Memo drafted; ${c.judgements.filter((j) => j.outcome !== "Pass").length} judgement area${c.judgements.filter((j) => j.outcome !== "Pass").length === 1 ? "" : "s"} to review`);
     audit(c, "Memo agent", "Assessed 5 judgement areas and drafted the credit memo", "agent");
     audit(c, "Policy agent", `Suggested ${c.rec.label}; required approver ${c.rec.approver}`, "agent");
-    c.status = c.decision ? c.status : "With RM";
+    if (!c.stage) c.stage = "rm";
+    c.status = STAGES[stageOf(c)];
   } catch (e) {
     const s = steps.find((x) => x.state === "active"); if (s) s.state = "error";
     c.run.error = e.message || String(e);
@@ -978,6 +1191,7 @@ async function runAgents(c, onlyMemo = false) {
   }
   c.run.running = false;
   save(); render();
+  if (typeof afterRun === "function") { try { await afterRun(c); } catch (e) { /* inbox follow-up is best effort */ } }
 }
 
 /* ------------------------------------------------------------------ human actions */
@@ -985,17 +1199,17 @@ function editField(c, key, newVal) {
   const f = c.fields[key]; const old = f.value;
   const v = NUMERIC.has(key) ? parseNum(newVal) : newVal.trim();
   if (NUMERIC.has(key) && v == null) { toast("Enter a number"); return; }
-  f.value = v; f.state = "Found"; f.edited = { by: "You", at: nowISO(), old };
+  f.value = v; f.state = "Found"; f.edited = { by: actor(), at: nowISO(), old };
   c.consistency = c.consistency.filter((x) => x.key !== key && x.key !== "tenants_sum");
   applyNA(c);
-  audit(c, "You", `Corrected ${FIELD[key].label}: "${old ?? "blank"}" to "${v}"`);
+  audit(c, actor(), `Corrected ${FIELD[key].label}: "${old ?? "blank"}" to "${v}"`);
   computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c);
   if (c.memo) c.memoStale = true;
   save(); render();
 }
 function confirmField(c, key) {
-  const f = c.fields[key]; f.edited = { by: "You", at: nowISO(), old: f.value, confirmed: true }; f.state = "Found";
-  audit(c, "You", `Confirmed ${FIELD[key].label} as "${f.value}"`);
+  const f = c.fields[key]; f.edited = { by: actor(), at: nowISO(), old: f.value, confirmed: true }; f.state = "Found";
+  audit(c, actor(), `Confirmed ${FIELD[key].label} as "${f.value}"`);
   computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c); save(); render();
 }
 

@@ -20,7 +20,7 @@ const extraction = {
     owned_by_borrower: { state: "Found", value: "Yes", source: { doc: "D1", page: 1, quote: "Owned by the borrower since 2017" } },
     purchase_price: { state: "Not applicable", value: null, note: "Refinance" },
     borrower_name: { state: "Found", value: "Redmere Estates Ltd", source: { doc: "D1", page: 1, quote: "Borrower: Redmere Estates Ltd" }, others: [{ value: "Redmere Estates Ltd", doc: "D2", page: 1, quote: "Redmere Estates Ltd" }] },
-    company_number: { state: "Found", value: "11456209", source: { doc: "D1", page: 1, quote: "company number 11456209" } },
+    company_number: { state: "Found", value: "11456209", source: { doc: "D2", page: 1, quote: "Company number 11456209" } },
     registered_address: { state: "Found", value: "88 Wilmslow Road, Manchester M14 5TQ", source: { doc: "D1", page: 1, quote: "88 Wilmslow Road" } },
     directors: { state: "Found", value: "Joanne Redmond and Patrick Redmond", source: { doc: "D1", page: 1, quote: "Joanne Redmond and Patrick Redmond" } },
     experience: { state: "Found", value: "Over 15 years in Greater Manchester retail property", source: { doc: "D1", page: 1, quote: "for over 15 years" } },
@@ -66,6 +66,22 @@ const memo = {
   broker_request: "Hi Ravi,\n\nThanks for sending Hulme Parade through. Before we go further, could you help with:\n- The rent: your email says £186,000 but the tenancy schedule shows £158,000\n- The position on Unit 6, which is holding over\n\nThanks,\n[Your name]",
 };
 
+const financials = { entity: "Redmere Estates Ltd", basis: "Summary", periods: [{ label: "FY2026", end: "2026-06-30" }, { label: "FY2025", end: "2025-06-30" }],
+  lines: [
+    { key: "rental_income", values: [171200, 183900], source: { doc: "D2", page: 1, quote: "Rental income" } },
+    { key: "property_costs", values: [22400, 19800], source: { doc: "D2", page: 1, quote: "Property costs" } },
+    { key: "finance_costs", values: [96300, 94100], source: { doc: "D2", page: 1, quote: "Finance costs" } },
+    { key: "profit_before_tax", values: [52500, 70000], source: { doc: "D2", page: 1, quote: "Profit before tax" } },
+    { key: "net_assets", values: [1104000, 1061000], source: { doc: "D2", page: 1, quote: "Net assets" } },
+  ],
+  guarantors: [], observations: [{ text: "Rental income fell from £183,900 to £171,200.", source: { doc: "D2", page: 1 } }], missing: ["Balance sheet detail, including bank debt", "Guarantor statements of assets and liabilities"] };
+const conditions = { conditions: [
+  { type: "Condition precedent", text: "First legal charge over 1 to 7 Hulme Parade", from: "B1", reason: "Standard security" },
+  { type: "Condition precedent", text: "Personal guarantees from Joanne and Patrick Redmond", from: "B9", reason: "Directors offered guarantees" },
+  { type: "Financial covenant", text: "ICR not below 1.35x, tested quarterly", from: "B17", reason: "ICR is below policy" },
+  { type: "Condition subsequent", text: "New lease for Unit 6 within 3 months of drawdown", from: "Case specific", reason: "Tenant holding over" },
+  { type: "Condition precedent", text: "Redemption statement from the existing lender", from: "B6", reason: "Refinance" },
+] };
 (async () => {
   const browser = await chromium.launch(process.env.HTTPS_PROXY ? { proxy: { server: process.env.HTTPS_PROXY } } : {});
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 1000 } });
@@ -76,7 +92,7 @@ const memo = {
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   let prompts = [];
-  await page.exposeFunction("__mockAI", (purpose) => (purpose === "extract" ? extraction : memo));
+  await page.exposeFunction("__mockAI", (purpose) => (purpose === "extract" ? extraction : purpose === "conditions" ? conditions : purpose === "financials" ? financials : memo));
   await page.exposeFunction("__logPrompt", (p) => { prompts.push(p); });
   await page.addInitScript(() => { window.__testAI = async (prompt, images, purpose) => { await window.__logPrompt(prompt.slice(0, 200000)); await new Promise((r) => setTimeout(r, 400)); return window.__mockAI(purpose); }; });
   await page.goto("file://" + path.join(__dirname, "../index.html"));
@@ -87,7 +103,26 @@ const memo = {
   await page.waitForTimeout(500);
   await page.screenshot({ path: OUT + "/2-memo.png", fullPage: true });
   await page.click('button[data-tab="source"]');
-  await page.screenshot({ path: OUT + "/3-source.png", fullPage: true });
+  await page.waitForSelector("#main .pdfpage img", { timeout: 10000 });
+  console.log("Source tab page image:", await page.locator("#main .pdfpage img").count(), "highlights:", await page.locator("#main .hlbox").count());
+  await page.screenshot({ path: OUT + "/3-source.png" });
+  await page.click('button[data-field="company_number"]');
+  console.log("Company number line:", await page.locator('button[data-field="company_number"] .from').innerText(), "|", await page.locator(".card.sticky .hint").first().innerText());
+  await page.click('button[data-tab="memo"]');
+  await page.locator('.memo-body button.ref').first().click();
+  await page.waitForSelector("#srcBody .pdfpage img, #srcBody .pagetext.paper", { timeout: 10000 });
+  await page.waitForTimeout(400);
+  console.log("Panel open:", await page.locator("#sourceModal:not([hidden])").count(), "image:", await page.locator("#srcBody .pdfpage img").count(), "highlights:", await page.locator("#srcBody .hlbox").count());
+  await page.screenshot({ path: OUT + "/3b-panel.png" });
+  await page.evaluate(() => openSource("D2", 1, "Company number 11456209"));
+  await page.waitForSelector("#srcBody .pdfpage img", { timeout: 10000 });
+  console.log("PDF panel highlights:", await page.locator("#srcBody .hlbox").count());
+  await page.screenshot({ path: OUT + "/3c-panel-pdf.png" });
+  await page.keyboard.press("Escape");
+  await page.click('button[data-tab="source"]');
+  await page.click('button[data-tab="fin"]');
+  console.log("Financials rows:", await page.locator("#main table.t tbody tr").count(), "flags:", await page.locator("#main .ready li").count());
+  await page.screenshot({ path: OUT + "/3d-financials.png", fullPage: true });
   await page.click('button[data-tab="policy"]');
   await page.screenshot({ path: OUT + "/4-policy.png", fullPage: true });
   await page.click('button[data-tab="decision"]');
@@ -105,12 +140,110 @@ const memo = {
   await page.click('button[data-tab="memo"]');
   console.log("Stale banner:", await page.locator(".stale").count());
   await page.click('button[data-tab="decision"]');
-  await page.click('input[value="Escalate to Credit Committee"]');
-  await page.fill("#decRationale", "ICR below policy on passing rent.");
+  await page.fill("#rmNote", "Rent confirmed at £158k with the broker. Unit 6 lease renewal in hand.");
+  await page.screenshot({ path: OUT + "/5a-rm-submit.png", fullPage: true });
+  await page.click('button[data-act="submit-uw"]');
+  console.log("Stage after submit:", await page.locator(".casecard .chip.c-amber").first().innerText());
+  await page.click('.rolebox button[data-role="Underwriter"]');
+  await page.waitForSelector(".cond", { timeout: 10000 });
+  console.log("Your action chip:", await page.locator(".casecard .chip.c-red").count());
+  await page.click('button[data-tab="memo"]');
+  await page.locator('button[data-act="comment"]').first().click();
+  await page.fill("#cmtEdit", "Please confirm the Unit 6 position before completion.");
+  await page.click('button[data-act="save-cmt"]');
+  console.log("Comments:", await page.locator(".cmt").count());
+  await page.click('button[data-tab="decision"]');
+  const n = await page.locator('button[data-act="cond-accept"]').count();
+  console.log("Conditions suggested:", n);
+  await page.locator('button[data-act="cond-reject"]').last().click();
+  while (await page.locator('.cond.suggested button[data-act="cond-accept"]').count()) await page.locator('.cond.suggested button[data-act="cond-accept"]').first().click();
+  await page.fill("#condText", "Rent deposit of six months from Ironside Barbers");
+  await page.click('button[data-act="cond-add"]');
+  await page.selectOption("#decGrade", "5");
+  await page.click('input[value="Approve"]');
+  await page.fill("#decRationale", "Strong LTV and experienced sponsor.");
+  if (await page.locator("#decException").count()) {
+    await page.click('button[data-act="record"]');
+    console.log("Msg without exception reason:", await page.locator("#decMsg").innerText());
+    await page.fill("#decException", "ICR 1.32x on passing rent; mitigated by 65% LTV and guarantees.");
+  } else console.log("No policy exception after the rent correction");
+  await page.screenshot({ path: OUT + "/5b-uw-decide.png", fullPage: true });
   await page.click('button[data-act="record"]');
   console.log("Status:", await page.locator(".casecard .chip.c-amber").first().innerText());
+  await page.screenshot({ path: OUT + "/5c-decided.png", fullPage: true });
   await page.click('button[data-tab="audit"]');
   console.log("Audit rows:", await page.locator(".audit li").count());
+  // second case: policy exception and return to RM
+  await page.click('.rolebox button[data-role="Relationship Manager"]');
+  await page.click('button[data-view="new"]');
+  await page.click('button[data-sample="inconsistent"]');
+  await page.waitForSelector(".memo-sec", { timeout: 20000 });
+  await page.click('button[data-tab="decision"]');
+  await page.click('button[data-act="submit-uw"]');
+  await page.click('.rolebox button[data-role="Underwriter"]');
+  await page.waitForSelector(".cond", { timeout: 10000 });
+  await page.click('input[value="Return to the RM"]');
+  await page.fill("#decRationale", "Get the Unit 6 lease position from the broker.");
+  await page.click('button[data-act="record"]');
+  console.log("After return:", await page.locator(".casecard .chip.c-amber").first().innerText());
+  await page.click('.rolebox button[data-role="Relationship Manager"]');
+  console.log("RM sees return note:", await page.locator(".errbox").count());
+  await page.click('button[data-act="submit-uw"]');
+  await page.click('.rolebox button[data-role="Underwriter"]');
+  await page.waitForSelector(".cond");
+  while (await page.locator('.cond.suggested button[data-act="cond-accept"]').count()) await page.locator('.cond.suggested button[data-act="cond-accept"]').first().click();
+  await page.selectOption("#decGrade", "6");
+  await page.click('input[value="Approve"]');
+  await page.fill("#decRationale", "Acceptable with conditions.");
+  await page.click('button[data-act="record"]');
+  console.log("Exception msg:", await page.locator("#decMsg").innerText());
+  await page.fill("#decException", "ICR 1.32x mitigated by 65% LTV and guarantees.");
+  await page.screenshot({ path: OUT + "/5d-exception.png", fullPage: true });
+  await page.click('button[data-act="record"]');
+  console.log("Second status:", await page.locator(".casecard .chip.c-amber").first().innerText());
+  await page.click('button[data-view="cases"]');
+  await page.screenshot({ path: OUT + "/6b-cases-uw.png" });
+  // deals inbox: mocked Google Apps Script web app
+  const fs = require("fs");
+  const pdfB64 = fs.readFileSync(path.join(__dirname, "samples/inconsistent/Tenancy schedule - Hulme Parade.pdf")).toString("base64");
+  const gas = { calls: [], round: 0 };
+  await ctx.route(/script\.google\.com\/macros/, async (route) => {
+    const req = route.request(); const u = new URL(req.url());
+    const p = req.method() === "POST" ? JSON.parse(req.postData() || "{}") : Object.fromEntries(u.searchParams);
+    gas.calls.push(p.action);
+    let body = { ok: true };
+    if (p.key !== "demo-key") body = { error: "The key does not match the one in the script." };
+    else if (p.action === "ping") body = { ok: true, inbox: "nashflow.deals.demo@gmail.com" };
+    else if (p.action === "list") {
+      gas.round++;
+      body = { ok: true, messages: gas.round === 1 ? [{ id: "m1", threadId: "t1", from: "Ravi Sandhu <ravi@sandhufinance.example>", to: "nashflow.deals.demo@gmail.com", subject: "Refinance request - Redmere Estates Ltd - Hulme Parade", date: "2026-11-05T08:05:00Z", body: "Borrower: Redmere Estates Ltd. Loan: £1,600,000, term 7 years.", attachments: [{ name: "Tenancy schedule - Hulme Parade.pdf", type: "application/pdf", b64: pdfB64 }] }]
+        : gas.round === 3 ? [{ id: "m2", threadId: "t1", from: "Ravi Sandhu <ravi@sandhufinance.example>", subject: "Re: Refinance request", date: "2026-11-05T10:00:00Z", body: "Unit 6 lease attached.", attachments: [{ name: "Unit 6 lease.pdf", type: "application/pdf", b64: pdfB64 }] }] : [] };
+    }
+    else if (p.action === "send") body = p.threadId === "t1" && p.body ? { ok: true } : { error: "bad send" };
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  });
+  await page.click('.rolebox button[data-role="Relationship Manager"]');
+  await page.click('button[data-view="inbox"]');
+  await page.fill("#ibUrl", "https://script.google.com/macros/s/TEST/exec");
+  await page.fill("#ibKey", "demo-key");
+  await page.check("#ibChase");
+  await page.click('button[data-act="inbox-test"]');
+  await page.waitForTimeout(300);
+  await page.click('button[data-act="inbox-check"]');
+  await page.waitForFunction(() => cases.some((c) => c.source && c.memo && c.chase && c.chase.sent.length), null, { timeout: 20000 });
+  console.log("Inbox case:", await page.evaluate(() => { const c = cases.find((x) => x.source); return [c.ref, c.title, c.docs.length + " docs", c.chase.sent.length + " sent", c.status].join(" | "); }));
+  await page.screenshot({ path: OUT + "/8-inbox.png", fullPage: true });
+  await page.click('button[data-act="inbox-check"]');
+  await page.waitForTimeout(800);
+  await page.click('button[data-act="inbox-check"]');
+  await page.waitForTimeout(1000);
+  await page.waitForFunction(() => { const c = cases.find((x) => x.source); return c.docs.length === 4 && c.memo && !c.run.running; }, null, { timeout: 20000 });
+  console.log("After reply:", await page.evaluate(() => { const c = cases.find((x) => x.source); return [c.docs.length + " docs", (c.chase.replies || []).length + " replies", c.chase.sent.length + " sent"].join(" | "); }));
+  await page.evaluate(() => { const c = cases.find((x) => x.source); currentId = c.id; view = "case"; currentTab = "memo"; render(); });
+  await page.click('button[data-act="chase-remind"]');
+  await page.click('button[data-act="chase-remind"]');
+  console.log("Flag RM:", await page.evaluate(() => cases.find((x) => x.source).chase.flagRM), "GAS calls:", gas.calls.join(","));
+  await page.screenshot({ path: OUT + "/9-chase.png", fullPage: true });
   // mobile
   const m = await browser.newPage({ viewport: { width: 400, height: 860 } });
   await m.addInitScript(() => { window.__testAI = async () => { throw new Error("x"); }; });

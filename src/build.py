@@ -24,7 +24,7 @@ samples = {}
 meta = {
     "clean": ("Clean: £850k office refinance, Reading", "Complete and consistent. 60% LTV, ICR 1.9x. Expect Approve, Underwriter decides."),
     "incomplete": ("Incomplete: £2.4m industrial purchase, Leeds", "Broker estimate only, no rent roll, old accounts. Expect Request more information."),
-    "inconsistent": ("Inconsistent: £1.6m retail parade refinance, Manchester", "Email says rent £186k, tenancy schedule says £158k. Expect a mismatch flag and Escalate."),
+    "inconsistent": ("Inconsistent: £1.6m retail parade refinance, Manchester", "Email says rent £186k, tenancy schedule says £158k. Expect a mismatch flag and a policy exception for the Underwriter."),
 }
 for k, (label, blurb) in meta.items():
     d = os.path.join(H, "samples", k)
@@ -40,6 +40,7 @@ for k, (label, blurb) in meta.items():
 
 out = top + "\n" + mid + bottom
 out = out.replace("/*__SAMPLES__*/null", json.dumps(samples))
+out = out.replace('/*__GAS__*/""', json.dumps(open(os.path.join(H, "..", "gmail-intake", "Code.gs")).read()))
 assert "—" not in out, "em dash found"
 open(os.path.join(H, "nashflow-deal-processor.html"), "w").write(out)
 # Hosted copy for GitHub Pages: a full HTML document at the repo root
