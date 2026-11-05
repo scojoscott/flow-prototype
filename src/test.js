@@ -312,6 +312,7 @@ const conditions = { conditions: [
   });
   await page.click('.rolebox button[data-role="Relationship Manager"]');
   await page.click('button[data-view="inbox"]');
+  await page.click('button[data-act="inbox-settings"]');
   await page.fill("#ibUrl", "https://script.google.com/macros/s/TEST/exec");
   await page.fill("#ibKey", "demo-key");
   await page.check("#ibChase");
@@ -331,6 +332,9 @@ const conditions = { conditions: [
   await page.evaluate(() => { const c = cases.find((x) => x.source); currentId = c.id; view = "case"; currentTab = "comms"; render(); });
   await page.click('button[data-act="chase-remind"]');
   await page.click('button[data-act="chase-remind"]');
+  await page.click('button[data-view="inbox"]');
+  console.log("Inbox threads:", await page.locator(".thr").count(), "| mails in first:", await page.locator(".mail").count(), "| settings shown:", await page.locator("#ibUrl").count());
+  await page.screenshot({ path: OUT + "/8b-inbox-thread.png", fullPage: true });
   console.log("Flag RM:", await page.evaluate(() => cases.find((x) => x.source).chase.flagRM), "GAS calls:", gas.calls.join(","));
   await page.screenshot({ path: OUT + "/9-chase.png", fullPage: true });
   // stop and delete

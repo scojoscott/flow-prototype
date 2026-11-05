@@ -188,6 +188,22 @@ table.t tr.group td { background: var(--surface); font-weight: 700; font-size: 1
 .memocard .memo-body { max-width: none; font-size: 14.5px; line-height: 1.6; text-align: justify; hyphens: auto; }
 .memocard .memo-body li { text-align: justify; }
 .sendcredit { border-color: var(--accent); }
+.inboxbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-bottom: 16px; }
+.inboxbar .grow { flex: 1; }
+.inboxgrid { display: grid; grid-template-columns: minmax(260px, 340px) minmax(0, 1fr); gap: 16px; align-items: start; margin-top: 16px; }
+@media (max-width: 900px) { .inboxgrid { grid-template-columns: 1fr; } }
+.thrlist { display: grid; gap: 8px; }
+.thr { display: grid; grid-template-columns: 1fr auto; gap: 4px 8px; text-align: left; border: 1px solid var(--line); border-radius: 6px; background: var(--bg); padding: 10px 12px; font: inherit; cursor: pointer; }
+.thr.sel { border-color: var(--accent); box-shadow: inset 3px 0 0 var(--accent); }
+.thr .who { font-weight: 700; }
+.thr .when { font-size: 12px; color: var(--muted); }
+.thr .subj { grid-column: 1 / -1; font-size: 13.5px; }
+.thr .row { grid-column: 1 / -1; }
+.mails { display: grid; gap: 12px; }
+.mail { border: 1px solid var(--line); border-radius: 6px; padding: 12px 14px; display: grid; gap: 6px; }
+.mail.out { background: var(--info-soft); }
+.mail header { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.mailbody { white-space: pre-wrap; font-size: 14px; line-height: 1.55; max-height: 420px; overflow: auto; }
 .rvq { display: grid; gap: 6px; padding: 12px 0; border-top: 1px solid var(--line); }
 .rvq:first-of-type { border-top: 0; padding-top: 0; }
 .rvq h3 { font-size: 14px; font-weight: 700; }
