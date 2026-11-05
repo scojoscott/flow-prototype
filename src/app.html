@@ -949,6 +949,62 @@ function computeAnalysis(c) {
   c.analysis = out;
 }
 
+/* ------------------------------------------------------------------ stress tests and structure what-if (calculated, not AI) */
+function baseInputs(c) {
+  const rb = String(usable(c, "repayment_basis") || "");
+  return { L: num(c, "loan_amount"), V: num(c, "property_value"), R: num(c, "annual_rent"), T: num(c, "loan_term_years"), rate: num(c, "interest_rate_pct"),
+    amort: /amort|capital|repay/i.test(rb) && !/interest only/i.test(rb) };
+}
+function metricsFor(c, o) {
+  const rUsed = Math.max(o.rate || 0, POLICY.stressRate) + (o.shock || 0);
+  const ltvMax = c.tenants.length === 1 ? POLICY.maxLTVSingle : POLICY.maxLTV;
+  const out = { rUsed, ltvMax, ltv: null, icr: null, dscr: null };
+  if (o.L != null && o.V) out.ltv = (o.L / o.V) * 100;
+  if (o.L && o.R != null) out.icr = o.R / ((o.L * rUsed) / 100);
+  if (o.amort && o.L && o.R != null && o.T) { const m = rUsed / 100 / 12, n = o.T * 12; out.dscr = o.R / (((o.L * m) / (1 - Math.pow(1 + m, -n))) * 12); }
+  return out;
+}
+/* Largest loan that meets the day-one policy limits for the given term, rate and repayment basis */
+function maxLoanFor(c, o) {
+  const m = metricsFor(c, Object.assign({}, o, { L: 1 }));
+  const caps = [];
+  if (o.V) caps.push({ by: "LTV", v: (o.V * m.ltvMax) / 100 });
+  if (o.R != null) caps.push({ by: "ICR", v: o.R / (POLICY.minICR * m.rUsed / 100) });
+  if (o.amort && o.R != null && o.T) { const r = m.rUsed / 100 / 12, n = o.T * 12; const perPound = (r / (1 - Math.pow(1 + r, -n))) * 12; caps.push({ by: "DSCR", v: o.R / (POLICY.minDSCR * perPound) }); }
+  caps.push({ by: "the £10m cap", v: POLICY.maxLoan });
+  const best = caps.sort((a, b) => a.v - b.v)[0];
+  return { v: Math.floor(best.v / 5000) * 5000, by: best.by };
+}
+function stressRows(c) {
+  const b = baseInputs(c); if (b.L == null || b.R == null) return [];
+  const top = c.tenants.filter((t) => t.annual_rent > 0).sort((a, b2) => b2.annual_rent - a.annual_rent)[0];
+  const sc = [["Base case", {}], ["Rates up 1%", { shock: 1 }], ["Rates up 2%", { shock: 2 }], ["Rates up 3%", { shock: 3 }], ["Rent down 10%", { rent: -10 }], ["Rent down 20%", { rent: -20 }]];
+  if (top && c.tenants.length > 1) sc.push([`Largest tenant leaves (${top.name})`, { lose: top.annual_rent }]);
+  sc.push(["Value down 10%", { value: -10 }], ["Value down 20%", { value: -20 }], ["Value down 30%", { value: -30 }], ["Combined downside: rates +2%, rent -10%, value -15%", { shock: 2, rent: -10, value: -15 }], ["Severe: rates +3%, rent -20%, value -30%", { shock: 3, rent: -20, value: -30 }]);
+  return sc.map(([label, x]) => Object.assign({ label }, stressOne(c, b, x)));
+}
+function stressOne(c, b, x) {
+  const R = b.R * (1 + (x.rent || 0) / 100) - (x.lose || 0); const V = b.V != null ? b.V * (1 + (x.value || 0) / 100) : null;
+  const m = metricsFor(c, Object.assign({}, b, { R, V, shock: x.shock || 0 }));
+  const rag = (v, pol, cov, lower) => v == null ? "" : (lower ? v <= pol + 1e-9 : v >= pol - 1e-9) ? "green" : (lower ? v <= cov + 1e-9 : v >= cov - 1e-9) ? "amber" : "red";
+  return { R, V, rate: m.rUsed, ltv: m.ltv, icr: m.icr, dscr: m.dscr,
+    ltvRag: rag(m.ltv, m.ltvMax, COVENANTS.ltv, true), icrRag: rag(m.icr, POLICY.minICR, COVENANTS.icr), dscrRag: rag(m.dscr, POLICY.minDSCR, COVENANTS.dscr) };
+}
+function stressBreakeven(c) {
+  const b = baseInputs(c); if (b.L == null || b.R == null) return [];
+  const m = metricsFor(c, b); const out = [];
+  out.push({ label: "Interest rate at which ICR breaches the covenant", value: pct((b.R / (COVENANTS.icr * b.L)) * 100, 2), note: `Today ${m.rUsed}% is used (the higher of pay rate and the ${POLICY.stressRate}% stress rate).` });
+  out.push({ label: "Rent fall before ICR breaches the covenant", value: pct(Math.max(0, (1 - (COVENANTS.icr * b.L * m.rUsed / 100) / b.R) * 100), 0), note: `Covenant ${COVENANTS.icr}x.` });
+  if (b.V) out.push({ label: "Value fall before LTV breaches the covenant", value: pct(Math.max(0, (1 - b.L / (COVENANTS.ltv / 100) / b.V) * 100), 0), note: `Covenant ${COVENANTS.ltv}%.` });
+  return out;
+}
+function stressText(c) {
+  const rows = stressRows(c); if (!rows.length) return "";
+  const word = (r) => (r === "green" ? "within policy" : r === "amber" ? "below policy, within covenant" : r === "red" ? "breaches covenant" : "");
+  return "\n\nStress tests (calculated):\n\n" + rows.slice(1).map((r) => `- **${r.label}:** ICR ${r.icr != null ? times(r.icr) : "-"} (${word(r.icrRag)})${r.ltv != null ? `, LTV ${pct(r.ltv)} (${word(r.ltvRag)})` : ""}${r.dscr != null ? `, DSCR ${times(r.dscr)}` : ""}`).join("\n")
+    + "\n" + stressBreakeven(c).map((x) => `- **${x.label}:** ${x.value}`).join("\n");
+}
+
 /* ------------------------------------------------------------------ recommendation (BR-06) and routing (BR-07) */
 function computeRecommendation(c) {
   const allChecks = c.checks.concat(c.judgements);
@@ -998,7 +1054,7 @@ function systemSections(c) {
     external: "Companies House, Land Registry and credit bureau checks are not connected in this prototype. In the product, Companies House is checked live and Land Registry and bureau results are mocked for the MVP.",
     policy: `Assessed against the ${POLICY.name} (${POLICY.version}). Numeric limits are calculated, not judged by the AI.\n\n${pol}`,
     recommendation: rec,
-    sensitivity: "Calculated in code from the extracted figures. Covenant levels come from the credit policy, section 7.2 Standard financial covenants: LTV no more than " + COVENANTS.ltv + "%, ICR at least " + COVENANTS.icr + "x, DSCR at least " + COVENANTS.dscr + "x if amortising. " + POLICY.covTesting + ".\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate."),
+    sensitivity: "Calculated in code from the extracted figures. Covenant levels come from the credit policy, section 7.2 Standard financial covenants: LTV no more than " + COVENANTS.ltv + "%, ICR at least " + COVENANTS.icr + "x, DSCR at least " + COVENANTS.dscr + "x if amortising. " + POLICY.covTesting + ".\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate.") + stressText(c),
   };
 }
 function refreshSystemSections(c) {

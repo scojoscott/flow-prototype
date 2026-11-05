@@ -144,6 +144,27 @@ const conditions = { conditions: [
   console.log("Memo ref panel:", await page.locator("#srcBody .qnote").count() ? await page.locator("#srcBody .qnote").innerText() : "no highlight");
   await page.screenshot({ path: OUT + "/3e-memo-ref.png" });
   await page.keyboard.press("Escape");
+  // the RM's own view
+  await page.click('button[data-act="submit-uw"]');
+  console.log("Blocked without view, now on:", await page.evaluate(() => currentTab));
+  await page.click('button[data-act="rmv-choice"][data-key="sponsor"][data-choice="Met them"]');
+  await page.fill('textarea[data-rmv="sponsor"]', "Known to us for 8 years through two previous loans, both repaid early. Patrick runs the portfolio day to day.");
+  await page.fill('textarea[data-rmv="story"]', "Refinance away from a high street bank that is exiting secondary retail. Exit by refinance or sale of the parade once Unit 7 is let.");
+  for (const el of await page.locator("textarea[data-rmq]").all()) await el.fill("Discussed with the broker on 4 Nov: covered in the conditions.");
+  await page.click('button[data-act="rmv-rec"][data-choice="Support with conditions"]');
+  await page.fill('input[data-wi="rate"]', "7.5");
+  await page.click('button[data-act="wi-max"]');
+  console.log("What-if max loan:", await page.evaluate(() => rmView(cur()).wi.L), "|", (await page.locator("#wiOut .hint").innerText()));
+  await page.click('button[data-act="wi-propose"]');
+  console.log("View missing:", await page.evaluate(() => rmViewMissing(cur()).join(", ") || "none"));
+  await page.screenshot({ path: OUT + "/5w-rm-view.png", fullPage: true });
+  await page.click('button[data-tab="fin"]');
+  console.log("Stress rows:", await page.evaluate(() => stressRows(cur()).map((r) => r.label + " " + times(r.icr) + " " + r.icrRag).slice(0, 4).join(" / ")));
+  await page.fill('input[data-stress="rent"]', "-15");
+  console.log("Custom stress:", await page.locator("#stressOut").innerText());
+  await page.screenshot({ path: OUT + "/3f-stress.png", fullPage: true });
+  await page.click('button[data-tab="memo"]');
+  console.log("Memo has RM assessment:", (await page.locator(".memocard .rmsec").innerText()).slice(0, 120).replace(/\n/g, " / "));
   await page.fill("#rmNote", "Rent confirmed at £158k with the broker. Unit 6 lease renewal in hand.");
   await page.screenshot({ path: OUT + "/5a-rm-submit.png", fullPage: true });
   await page.click('button[data-act="submit-uw"]');
@@ -211,6 +232,7 @@ const conditions = { conditions: [
   await page.click('button[data-sample="inconsistent"]');
   await page.waitForSelector(".memo-sec", { timeout: 20000 });
   await page.click('button[data-tab="memo"]');
+  await page.evaluate(() => { const v = rmView(cur()); v.a.sponsor = "Known sponsor."; v.a.story = "Refinance."; creditQuestions(cur()).forEach((q) => (v.qa[q.key] = "Answered.")); v.rec = "Support"; save(); render(); });
   await page.click('button[data-act="submit-uw"]');
   await page.click('.rolebox button[data-role="Underwriter"]');
   await page.click('button[data-view="cases"]');
