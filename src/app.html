@@ -612,12 +612,13 @@ function save() {
 }
 const cur = () => cases.find((c) => c.id === currentId);
 /* Roles (requirements v1.1): the RM prepares the case, the Underwriter decides every case up to £10m. No Credit Committee. */
-const ROLES = ["Relationship Manager", "Underwriter", "Head of Lending"]; // Head of Lending holds the Approve pricing permission
+const ROLES = ["Relationship Manager", "Underwriter", "Commercial"]; // Commercial alone approves pricing; it cannot decide credit
 let currentRole = load("nashflow.role", "Relationship Manager");
+if (currentRole === "Head of Lending") currentRole = "Commercial";
 if (!ROLES.includes(currentRole)) currentRole = "Relationship Manager";
 const actor = () => currentRole;
 const STAGES = { rm: "With RM", uw: "With Underwriter", returned: "Returned to RM", approved: "Approved, pricing", declined: "Declined", terms: "Terms issued" };
-const SIGNERS = ["Relationship Manager", "Underwriter", "Head of Lending"];
+const PRICING_APPROVER = "Commercial";
 function stageOf(c) { return c.stage || (c.decision ? (c.decision.choice === "Decline" ? "declined" : "approved") : "rm"); }
 function waitingList(c) {
   const s = stageOf(c);
@@ -626,7 +627,7 @@ function waitingList(c) {
   if (s === "approved") {
     const p = c.pricing;
     if (!p || p.status === "draft") return ["Relationship Manager"];
-    if (p.status === "awaiting") return SIGNERS.filter((r) => !(p.signoffs || {})[r]);
+    if (p.status === "awaiting") return [PRICING_APPROVER];
     return ["Relationship Manager"]; // agreed: RM issues the terms letter
   }
   return [];
