@@ -329,6 +329,14 @@ const POLICY = {
   maxLTV: 70, maxLTVSingle: 65, minICR: 1.5, stressRate: 6.5, minDSCR: 1.25,
   minWAULT: 3, concentration: 50, accountsMonths: 12, uwLimit: 1000000,
   /* 7.2 Standard financial covenants: ongoing tests in the facility agreement, with headroom over the day-one limits */
+  /* 7.3 Pricing grid (illustrative): margin over the reference rate by LTV band, adjusted for risk grade and risk features */
+  pricing: {
+    referenceRate: 4.0, referenceName: "Reference rate (illustrative)", floorMargin: 2.5,
+    bands: [[50, 2.75], [60, 3.1], [65, 3.4], [70, 3.75]],
+    grade: [[3, -0.15], [6, 0], [8, 0.35], [10, 0.75]],
+    adj: { shortWAULT: 0.25, concentration: 0.2, epcBelowC: 0.1, exception: 0.5 },
+    feeSmall: 1.75, feeLarge: 1.5, feeThreshold: 1000000, feeMin: 5000, exitFee: 0, validityDays: 30,
+  },
   covLTV: 75, covICR: 1.35, covDSCR: 1.15, covTesting: "LTV annually on a lender-instructed valuation; ICR and DSCR quarterly on a 12-month rolling basis",
 };
 const JUDGEMENT_AREAS = [
@@ -604,13 +612,27 @@ function save() {
 }
 const cur = () => cases.find((c) => c.id === currentId);
 /* Roles (requirements v1.1): the RM prepares the case, the Underwriter decides every case up to £10m. No Credit Committee. */
-const ROLES = ["Relationship Manager", "Underwriter"];
+const ROLES = ["Relationship Manager", "Underwriter", "Head of Lending"]; // Head of Lending holds the Approve pricing permission
 let currentRole = load("nashflow.role", "Relationship Manager");
 if (!ROLES.includes(currentRole)) currentRole = "Relationship Manager";
 const actor = () => currentRole;
-const STAGES = { rm: "With RM", uw: "With Underwriter", returned: "Returned to RM", approved: "Approved", declined: "Declined" };
+const STAGES = { rm: "With RM", uw: "With Underwriter", returned: "Returned to RM", approved: "Approved, pricing", declined: "Declined", terms: "Terms issued" };
+const SIGNERS = ["Relationship Manager", "Underwriter", "Head of Lending"];
 function stageOf(c) { return c.stage || (c.decision ? (c.decision.choice === "Decline" ? "declined" : "approved") : "rm"); }
-function waitingOn(c) { const s = stageOf(c); return s === "uw" ? "Underwriter" : s === "rm" || s === "returned" ? "Relationship Manager" : null; }
+function waitingList(c) {
+  const s = stageOf(c);
+  if (s === "uw") return ["Underwriter"];
+  if (s === "rm" || s === "returned") return ["Relationship Manager"];
+  if (s === "approved") {
+    const p = c.pricing;
+    if (!p || p.status === "draft") return ["Relationship Manager"];
+    if (p.status === "awaiting") return SIGNERS.filter((r) => !(p.signoffs || {})[r]);
+    return ["Relationship Manager"]; // agreed: RM issues the terms letter
+  }
+  return [];
+}
+function waitingOn(c) { const w = waitingList(c); return w.length ? w.join(" and ") : null; }
+function myTurn(c) { return !!c.memo && waitingList(c).includes(currentRole); }
 function audit(c, who, what, kind = "human") { c.audit.push({ at: nowISO(), who, what, kind }); }
 
 async function newCaseFromFiles(files, title, extra) {
@@ -1119,6 +1141,33 @@ function finBlock(c) {
   const rat = f.ratios.map((r) => `- ${r.label} (calculated): ${f.periods.map((p, i) => `${p.label} ${r.values[i]}`).join(", ")}`);
   const g = f.guarantors.map((x) => `- ${x.name}: assets ${money(x.assets)}, liabilities ${money(x.liabilities)}, net worth ${money(x.net_worth)}${x.liquid != null ? ", liquid " + money(x.liquid) : ""}${x.source ? ` [${x.source.doc} p${x.source.page || 1}]` : ""}`);
   return [`Entity: ${f.entity}. Basis: ${f.basis}.`, ...rows, ...rat, ...(g.length ? ["Guarantors:", ...g] : []), ...(f.flags.length ? ["Flags:", ...f.flags.map((x) => "- " + x.text)] : [])].join("\n");
+}
+
+/* ------------------------------------------------------------------ pricing (policy 7.3), calculated in code */
+function gridPricing(c) {
+  const P = POLICY.pricing; const L = num(c, "loan_amount"); const V = num(c, "property_value");
+  const ltv = L != null && V ? (L / V) * 100 : null;
+  const lines = [];
+  const band = ltv == null ? P.bands[P.bands.length - 1] : (P.bands.find((b) => ltv <= b[0] + 1e-9) || P.bands[P.bands.length - 1]);
+  lines.push({ label: ltv == null ? "LTV band (LTV not known, top band used)" : `LTV band up to ${band[0]}% (LTV ${ltv.toFixed(1)}%)`, add: band[1], base: true });
+  const g = c.decision && +c.decision.grade;
+  if (g) { const gb = P.grade.find((x) => g <= x[0]); if (gb && gb[1]) lines.push({ label: `Risk grade ${g}`, add: gb[1] }); }
+  const k = (id) => c.checks.find((x) => x.id === id);
+  const w = k("wault"); if (w && w.metric != null && w.metric < POLICY.minWAULT) lines.push({ label: `WAULT under ${POLICY.minWAULT} years`, add: P.adj.shortWAULT });
+  const cn = k("conc"); if (cn && cn.flag === "amber") lines.push({ label: "One tenant pays over half the rent", add: P.adj.concentration });
+  const e = k("epc"); if (e && "DE".includes(String(e.value))) lines.push({ label: `EPC ${e.value} (below C)`, add: P.adj.epcBelowC });
+  if (c.rec && c.rec.exceptions.length) lines.push({ label: "Approved as a policy exception", add: P.adj.exception });
+  const margin = Math.max(P.floorMargin, lines.reduce((s2, x) => s2 + x.add, 0));
+  const feePct = L != null && L >= P.feeThreshold ? P.feeLarge : P.feeSmall;
+  return { margin: +margin.toFixed(2), lines, feePct, exitPct: P.exitFee, ltv };
+}
+function priceFigures(c, p) {
+  const P = POLICY.pricing; const L = num(c, "loan_amount"); const R = num(c, "annual_rent");
+  const rate = P.referenceRate + p.margin;
+  const fee = L != null ? Math.max(P.feeMin, (L * p.feePct) / 100) : null;
+  const interest = L != null ? (L * rate) / 100 : null;
+  const icr = interest && R != null ? R / interest : null;
+  return { rate, fee, interest, icr, icrOk: icr == null ? null : icr >= POLICY.minICR };
 }
 
 /* ------------------------------------------------------------------ the agent run */
