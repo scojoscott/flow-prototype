@@ -1196,6 +1196,7 @@ function finBlock(c) {
 }
 
 /* ------------------------------------------------------------------ the agent run */
+function stopCheck(c) { if (c.run && c.run.cancel) throw new Error(c.run.cancel); }
 async function runAgents(c, onlyMemo = false) {
   const imgs = memImages[c.id] || [];
   const steps = [
@@ -1214,6 +1215,7 @@ async function runAgents(c, onlyMemo = false) {
     if (!onlyMemo) {
       set("extract", "active");
       const r = await askAI(extractPrompt(c, imgs), imgs, "extract");
+      stopCheck(c);
       normaliseExtraction(c, r);
       const found = FIELDS.filter((f) => c.fields[f.key].state === "Found").length;
       set("extract", "done", `${found} of ${FIELDS.length} fields found, ${c.tenants.length} tenant${c.tenants.length === 1 ? "" : "s"}, ${c.consistency.length} consistency flag${c.consistency.length === 1 ? "" : "s"}`);
@@ -1229,17 +1231,21 @@ async function runAgents(c, onlyMemo = false) {
       set("fin", "active");
       try {
         const fr = await askAI(finPrompt(c), [], "financials");
+        stopCheck(c);
         computeFinancials(c, fr);
         set("fin", "done", `${c.financials.periods.length} year${c.financials.periods.length === 1 ? "" : "s"} spread, ${c.financials.guarantors.length} guarantor statement${c.financials.guarantors.length === 1 ? "" : "s"}, ${c.financials.flags.length} flag${c.financials.flags.length === 1 ? "" : "s"}`);
         audit(c, "Financial analysis agent", `Spread ${c.financials.periods.length} years of accounts and ${c.financials.guarantors.length} guarantor statements; ratios calculated in code`, "agent");
       } catch (e) {
+        if (c.run.cancel) throw e;
         c.financials = null;
         set("fin", "error", "Skipped: " + (e.message || e));
         audit(c, "Financial analysis agent", "Stopped, the memo continues without the spread: " + (e.message || e), "agent");
       }
     }
     set("memo", "active");
+    stopCheck(c);
     const m = await askAI(memoPrompt(c), [], "memo");
+    stopCheck(c);
     c.judgements = JUDGEMENT_AREAS.map((j) => {
       const got = (m.judgements || []).find((x) => String(x.area || "").toLowerCase() === j.area.toLowerCase()) || {};
       const outcome = ["Pass", "Fail", "Unclear"].includes(got.outcome) ? got.outcome : "Unclear";
@@ -1359,7 +1365,7 @@ function caseRow(c) {
   return `<tr><td class="num">${dateOf(c.createdAt)} ${timeOf(c.createdAt)}<span class="sub">uploaded</span></td>
     <td><b>${esc(c.title)}</b>${c.source && c.source.kind === "email" ? ` <span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? ` <span class="chip c-red">Broker not replying</span>` : ""}<span class="sub">${esc(c.ref)}${c.fields && usable(c, "broker") ? " · " + esc(usable(c, "broker")) : ""}</span></td>
     <td class="fv">${shortMoney(L)}</td><td>${complete}</td><td>${consistent}</td><td>${esc(STAGES[stageOf(c)])}${c.memo && waitingOn(c) === currentRole ? ` <span class="chip c-red">Your action</span>` : c.memo && waitingOn(c) ? `<span class="sub">Waiting on ${esc(waitingOn(c))}</span>` : ""}</td><td>${rec}</td>
-    <td><button class="btn primary small" type="button" data-case="${c.id}">Open case</button></td></tr>`;
+    <td><div class="row" style="flex-wrap:nowrap"><button class="btn primary small" type="button" data-case="${c.id}">Open case</button><button class="btn small" type="button" data-delcase="${c.id}" title="Delete this case">Delete</button></div></td></tr>`;
 }
 function renderCases() {
   const done = cases.filter((c) => c.rec && c.memo);
@@ -1415,6 +1421,7 @@ function renderAgents(c) {
   return `<div class="card"><div class="cardhead"><h2>Agents at work</h2>${c.run.running ? `<span class="chip c-amber">Working</span>` : c.run.error ? `<span class="chip c-red">Stopped</span>` : `<span class="chip c-green">Case ready</span>`}</div>
     <div class="timeline">${c.run.steps.map((s) => `<div class="tl"><span class="time">${s.at ? timeOf(s.at) : ""}</span><div><b>${esc(s.agent)}</b>${s.state === "done" ? `<span class="chip c-green">Done</span>` : s.state === "active" ? `<span class="spin" aria-label="Working"></span>` : s.state === "error" ? `<span class="chip c-red">Stopped</span>` : `<span class="chip c-grey">Waiting</span>`}<p>${esc(s.detail || s.text)}</p></div></div>`).join("")}</div>
     ${c.run.error ? `<div class="errbox"><b>The run stopped.</b> ${esc(c.run.error)}</div><div class="row"><button class="btn primary" type="button" data-act="rerun">Run the agents again</button><button class="btn" type="button" data-act="settings">Change AI provider</button></div>` : ""}
+    ${c.run.running ? `<div><button class="btn small" type="button" data-act="stop-run">Stop the agents</button></div>` : ""}
     ${!c.run.running && !c.run.error ? `<div><button class="btn small" type="button" data-act="rerun">Run all agents again</button></div>` : ""}</div>`;
 }
 function renderDocs(c) {
@@ -1707,7 +1714,7 @@ function renderPolicyAdmin() {
 function renderAgentsAdmin() {
   const p = activeProvider();
   const agents = [
-    ["Intake agent", "Reads the deals inbox and opens a case for each new broker email, adds broker replies to their case, emails the broker for missing information and sends reminders. Reads each document: PDF text, Word, Excel, emails and scanned images.", "In the browser, with a Google Apps Script for the demo inbox"],
+    ["Intake agent", "Reads the deals inbox, checks each email is a deal (automated senders are skipped and the AI checks the rest), opens a case for each broker email, adds broker replies to their case, emails the broker for missing information and sends reminders. Reads each document: PDF text, Word, Excel, emails and scanned images.", "In the browser, with a Google Apps Script for the demo inbox"],
     ["Extraction agent", "Classifies each document and extracts the application fields with the document, page and exact text, using four states.", PROVIDERS[p].name],
     ["Policy agent", "Calculates loan size, term, LTV, ICR, DSCR, location, EPC, WAULT, concentration and document age, and suggests a recommendation.", "Code, no AI"],
     ["Financial analysis agent", "Spreads up to three years of accounts and the guarantors' statements of assets and liabilities, with sources. Ratios are then calculated in code.", PROVIDERS[p].name],
@@ -1739,6 +1746,13 @@ function openSource(docId, page, quote) {
   document.body.classList.add("src-open");
   hydratePages($("#srcBody"));
   const m = $("#srcBody .pdfscroll mark"); if (m) { const sc = m.closest(".pdfscroll"); sc.scrollTop = Math.max(0, m.offsetTop - sc.clientHeight / 3); }
+}
+function deleteCase(x) {
+  if (x.run && x.run.running) x.run.cancel = "Case deleted.";
+  fileStore.delCase(x.id); closeSource();
+  cases = cases.filter((y) => y.id !== x.id);
+  if (currentId === x.id) { currentId = cases[0] ? cases[0].id : null; if (view === "case") view = cases.length ? "cases" : "new"; }
+  save(); render(); toast("Case deleted");
 }
 function closeSource() { $("#sourceModal").hidden = true; document.body.classList.remove("src-open"); }
 
@@ -1780,6 +1794,35 @@ function emailFile(m) {
   return new File([head + (m.body || "")], "Broker email" + (m.subject ? " - " + m.subject.replace(/[\\/:*?"<>|]/g, " ").slice(0, 60) : "") + ".txt", { type: "text/plain" });
 }
 const brokerName = (from) => { const n = String(from || "").replace(/<.*>/, "").replace(/"/g, "").trim(); return n || String(from || ""); };
+/* Triage: only broker deal emails become cases */
+const AUTOMATED_SENDER = /no-?reply|do-?not-?reply|mailer-daemon|postmaster|notifications?@|accounts\.google\.com|@google\.com|@.*\.google\.com|calendar-notification|newsletter/i;
+function triagePrompt(m) {
+  return `You are the intake agent in NashFlow, a commercial property lending tool for a UK specialist lender. Decide whether this email is a broker or borrower submitting a commercial property loan deal or enquiry (or sending documents for one). Account notices, security alerts, newsletters, marketing, calendar invites, receipts and personal emails are not deals.
+
+From: ${m.from}
+Subject: ${m.subject}
+Attachments: ${(m.attachments || []).map((a) => a.name).join(", ") || "none"}
+Body (start):
+${String(m.body || "").slice(0, 2500)}
+
+Reply with only this JSON: {"is_deal": true or false, "reason": "one short sentence"}`;
+}
+async function triageEmail(m) {
+  if (AUTOMATED_SENDER.test(m.from || "")) return { deal: false, reason: "Automated sender" };
+  try { const r = await askAI(triagePrompt(m), [], "triage"); return { deal: r.is_deal !== false, reason: r.reason || "" }; }
+  catch (e) { return { deal: true, reason: "Could not check, so opened as a case: " + (e.message || e) }; }
+}
+const ignoredMsgs = {}; // id -> message, this visit only, so a wrongly ignored email can still be opened
+async function openEmailAsCase(m) {
+  const files = [emailFile(m)].concat((m.attachments || []).map((a) => new File([b64ToBytes(a.b64)], a.name, { type: a.type || "application/octet-stream" })));
+  const prev = { id: currentId, view, tab: currentTab };
+  const c = await newCaseFromFiles(files, m.subject || "Email from " + brokerName(m.from), { source: { kind: "email", id: m.id, threadId: m.threadId, from: m.from, subject: m.subject, at: m.date } });
+  audit(c, "Intake agent", `Picked up an email from ${brokerName(m.from)}: "${m.subject}" with ${(m.attachments || []).length} attachment${(m.attachments || []).length === 1 ? "" : "s"}. Case opened automatically.`, "agent");
+  inboxLog(`New case ${c.ref} from ${brokerName(m.from)}: ${m.subject}`);
+  if (prev.view === "case" && prev.id) { currentId = prev.id; view = "case"; currentTab = prev.tab; } else view = prev.view === "new" ? "cases" : prev.view;
+  save(); render(); toast(`New case from ${brokerName(m.from)}. The agents are reading it.`);
+  return c;
+}
 async function pollInbox(manual) {
   if (!settings.inboxUrl || !settings.inboxKey) { if (manual) toast("Add the inbox address and key first"); return; }
   if (inboxBusy) return;
@@ -1800,12 +1843,14 @@ async function pollInbox(manual) {
         toast(`Broker replied on ${existing.ref}. The agents are updating the case.`);
         addFilesToCase(existing, files);
       } else {
-        const prev = { id: currentId, view, tab: currentTab };
-        const c = await newCaseFromFiles(files, m.subject || "Email from " + brokerName(m.from), { source: { kind: "email", id: m.id, threadId: m.threadId, from: m.from, subject: m.subject, at: m.date } });
-        audit(c, "Intake agent", `Picked up an email from ${brokerName(m.from)}: "${m.subject}" with ${m.attachments.length} attachment${m.attachments.length === 1 ? "" : "s"}. Case opened automatically.`, "agent");
-        inboxLog(`New case ${c.ref} from ${brokerName(m.from)}: ${m.subject}`);
-        if (prev.view === "case" && prev.id) { currentId = prev.id; view = "case"; currentTab = prev.tab; } else view = prev.view === "new" ? "cases" : prev.view;
-        save(); render(); toast(`New case from ${brokerName(m.from)}. The agents are reading it.`);
+        const t = await triageEmail(m);
+        if (!t.deal) {
+          ignoredMsgs[m.id] = m;
+          inboxState.ignored = [{ id: m.id, at: nowISO(), from: m.from, subject: m.subject, reason: t.reason }].concat(inboxState.ignored || []).slice(0, 20);
+          inboxLog(`Ignored, not a deal: ${brokerName(m.from)}, "${m.subject}" (${t.reason})`);
+          continue;
+        }
+        await openEmailAsCase(m);
       }
     }
     await chaseReminders();
@@ -1840,7 +1885,7 @@ async function chaseReminders() {
   render();
 }
 async function afterRun(c) {
-  if (!c.source || c.source.kind !== "email" || !c.memo) return;
+  if (!c.source || c.source.kind !== "email" || !c.memo || !cases.includes(c) || (c.run && c.run.error)) return;
   c.chase = c.chase || { sent: [], replies: [] };
   if (!c.brokerRequest) { if (c.chase.awaiting) { c.chase.awaiting = false; save(); } return; }
   if (!settings.chaseAuto || c.chase.awaiting) return;
@@ -1875,6 +1920,7 @@ function renderInbox() {
         ${ck("ibAuto", settings.inboxAuto, "Check for new emails every 30 seconds", "While this page is open.")}
         ${ck("ibChase", settings.chaseAuto, "Email the broker automatically for missing information", "Sent from the demo inbox as a reply in the broker's thread. Reminder after 2 working days, then the RM is flagged.")}
         <div class="row"><button class="btn primary" type="button" data-act="inbox-save">Save</button><button class="btn" type="button" data-act="inbox-test">Test the connection</button><button class="btn" type="button" data-act="inbox-check">Check now</button></div></div>
+      ${(inboxState.ignored || []).length ? `<div class="card"><h2>Ignored emails</h2><p class="hint">The intake agent decided these are not deals, so no case was opened.</p><ul class="handoffs">${inboxState.ignored.map((x) => `<li><span class="note">${dateOf(x.at)} ${timeOf(x.at)}</span> <b>${esc(brokerName(x.from))}</b>: ${esc(x.subject || "(no subject)")}<span class="sub">${esc(x.reason)}</span>${ignoredMsgs[x.id] ? ` <button class="btn small" type="button" data-act="inbox-open" data-id="${esc(x.id)}">Open as a case</button>` : ""}</li>`).join("")}</ul></div>` : ""}
       <div class="card"><h2>Activity</h2>${inboxState.log.length ? `<ul class="handoffs">${inboxState.log.map((x) => `<li><span class="note">${dateOf(x.at)} ${timeOf(x.at)}</span> ${esc(x.text)}</li>`).join("")}</ul>` : `<p class="hint">Nothing yet.</p>`}</div>
     </div><div class="stack">
       <div class="card"><h2>Set up the demo inbox (about 10 minutes)</h2>
@@ -1917,6 +1963,11 @@ document.addEventListener("click", async (e) => {
     settings.azureEndpoint = $("#aEnd").value.trim(); settings.azureDeployment = $("#aDep").value.trim(); settings.azureKey = $("#aKey").value.trim();
     store("nashflow.settings", settings); renderProviderPill(); $("#settingsModal").hidden = true; render(); toast("AI provider saved"); return;
   }
+  if (t.dataset.delcase) {
+    const x = cases.find((y) => y.id === t.dataset.delcase); if (!x) return;
+    if (t.dataset.confirm !== "1") { t.dataset.confirm = "1"; t.textContent = "Click again"; return; }
+    deleteCase(x); return;
+  }
   if (t.dataset.act && t.dataset.act.startsWith("inbox-")) {
     const a = t.dataset.act;
     if (a === "inbox-save" || a === "inbox-test" || a === "inbox-check") {
@@ -1927,16 +1978,17 @@ document.addEventListener("click", async (e) => {
     else if (a === "inbox-test") { try { const r = await inboxCall("ping"); inboxState.error = ""; toast("Connected to " + (r.inbox || "the inbox")); inboxLog("Connected to " + (r.inbox || "the inbox")); } catch (err) { inboxState.error = err.message; toast(err.message); } store("nashflow.inbox.state", inboxState); render(); }
     else if (a === "inbox-check") { await pollInbox(true); render(); }
     else if (a === "inbox-copy") copyText(INBOX_SCRIPT, "Script copied");
+    else if (a === "inbox-open") { const m = ignoredMsgs[t.dataset.id]; if (m) { delete ignoredMsgs[m.id]; inboxState.ignored = (inboxState.ignored || []).filter((x) => x.id !== m.id); store("nashflow.inbox.state", inboxState); await openEmailAsCase(m); } }
     return;
   }
   const c = cur(); if (!c) return;
   const act = t.dataset.act;
   if (act === "rerun") { runAgents(c); }
   else if (act === "redraft") { runAgents(c, true); }
+  else if (act === "stop-run") { if (c.run && c.run.running) { c.run.cancel = "Stopped by " + actor() + "."; t.disabled = true; t.textContent = "Stopping after the current step"; audit(c, actor(), "Stopped the agents"); } }
   else if (act === "delete-case") {
     if (t.dataset.confirm !== "1") { t.dataset.confirm = "1"; t.textContent = "Click again to delete"; return; }
-    fileStore.delCase(c.id); closeSource();
-    cases = cases.filter((x) => x.id !== c.id); currentId = cases[0] ? cases[0].id : null; view = cases.length ? "cases" : "new"; save(); render();
+    deleteCase(c); return;
   }
   else if (act === "edit-field") {
     const k = t.dataset.key; const f = c.fields[k];

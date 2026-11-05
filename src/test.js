@@ -92,9 +92,9 @@ const conditions = { conditions: [
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   let prompts = [];
-  await page.exposeFunction("__mockAI", (purpose) => (purpose === "extract" ? extraction : purpose === "conditions" ? conditions : purpose === "financials" ? financials : memo));
+  await page.exposeFunction("__mockAI", (purpose, prompt) => (purpose === "triage" ? { is_deal: /Refinance|Re:/.test(prompt), reason: /Refinance|Re:/.test(prompt) ? "Broker refinance request" : "Not a loan request" } : purpose === "extract" ? extraction : purpose === "conditions" ? conditions : purpose === "financials" ? financials : memo));
   await page.exposeFunction("__logPrompt", (p) => { prompts.push(p); });
-  await page.addInitScript(() => { window.__testAI = async (prompt, images, purpose) => { await window.__logPrompt(prompt.slice(0, 200000)); await new Promise((r) => setTimeout(r, 400)); return window.__mockAI(purpose); }; });
+  await page.addInitScript(() => { window.__testAI = async (prompt, images, purpose) => { await window.__logPrompt(prompt.slice(0, 200000)); await new Promise((r) => setTimeout(r, 400)); return window.__mockAI(purpose, prompt); }; });
   await page.goto("file://" + path.join(__dirname, "../index.html"));
   await page.waitForTimeout(1500);
   await page.screenshot({ path: OUT + "/1-new.png" });
@@ -216,7 +216,7 @@ const conditions = { conditions: [
     else if (p.action === "ping") body = { ok: true, inbox: "nashflow.deals.demo@gmail.com" };
     else if (p.action === "list") {
       gas.round++;
-      body = { ok: true, messages: gas.round === 1 ? [{ id: "m1", threadId: "t1", from: "Ravi Sandhu <ravi@sandhufinance.example>", to: "nashflow.deals.demo@gmail.com", subject: "Refinance request - Redmere Estates Ltd - Hulme Parade", date: "2026-11-05T08:05:00Z", body: "Borrower: Redmere Estates Ltd. Loan: £1,600,000, term 7 years.", attachments: [{ name: "Tenancy schedule - Hulme Parade.pdf", type: "application/pdf", b64: pdfB64 }] }]
+      body = { ok: true, messages: gas.round === 1 ? [{ id: "m1", threadId: "t1", from: "Ravi Sandhu <ravi@sandhufinance.example>", to: "nashflow.deals.demo@gmail.com", subject: "Refinance request - Redmere Estates Ltd - Hulme Parade", date: "2026-11-05T08:05:00Z", body: "Borrower: Redmere Estates Ltd. Loan: £1,600,000, term 7 years.", attachments: [{ name: "Tenancy schedule - Hulme Parade.pdf", type: "application/pdf", b64: pdfB64 }] }, { id: "g1", threadId: "tg", from: "Google <no-reply@accounts.google.com>", subject: "Security alert", date: "2026-11-05T08:00:00Z", body: "Recovery email was set up", attachments: [] }, { id: "g2", threadId: "tg2", from: "Pat Jones <pat@example.com>", subject: "Lunch on Friday?", date: "2026-11-05T08:01:00Z", body: "Fancy lunch?", attachments: [] }]
         : gas.round === 3 ? [{ id: "m2", threadId: "t1", from: "Ravi Sandhu <ravi@sandhufinance.example>", subject: "Re: Refinance request", date: "2026-11-05T10:00:00Z", body: "Unit 6 lease attached.", attachments: [{ name: "Unit 6 lease.pdf", type: "application/pdf", b64: pdfB64 }] }] : [] };
     }
     else if (p.action === "send") body = p.threadId === "t1" && p.body ? { ok: true } : { error: "bad send" };
@@ -231,6 +231,7 @@ const conditions = { conditions: [
   await page.waitForTimeout(300);
   await page.click('button[data-act="inbox-check"]');
   await page.waitForFunction(() => cases.some((c) => c.source && c.memo && c.chase && c.chase.sent.length), null, { timeout: 20000 });
+  console.log("Cases from email:", await page.evaluate(() => cases.filter((x) => x.source).length), "ignored:", await page.evaluate(() => (inboxState.ignored || []).map((x) => x.reason).join(" / ")));
   console.log("Inbox case:", await page.evaluate(() => { const c = cases.find((x) => x.source); return [c.ref, c.title, c.docs.length + " docs", c.chase.sent.length + " sent", c.status].join(" | "); }));
   await page.screenshot({ path: OUT + "/8-inbox.png", fullPage: true });
   await page.click('button[data-act="inbox-check"]');
@@ -244,6 +245,19 @@ const conditions = { conditions: [
   await page.click('button[data-act="chase-remind"]');
   console.log("Flag RM:", await page.evaluate(() => cases.find((x) => x.source).chase.flagRM), "GAS calls:", gas.calls.join(","));
   await page.screenshot({ path: OUT + "/9-chase.png", fullPage: true });
+  // stop and delete
+  await page.click('button[data-view="new"]');
+  await page.evaluate(() => { window.__slow = true; });
+  await page.click('button[data-sample="clean"]');
+  await page.waitForSelector('button[data-act="stop-run"]');
+  await page.click('button[data-act="stop-run"]');
+  await page.waitForFunction(() => cur().run && !cur().run.running, null, { timeout: 15000 });
+  console.log("Stopped run error:", await page.evaluate(() => cur().run.error));
+  const before = await page.evaluate(() => cases.length);
+  await page.click('button[data-view="cases"]');
+  await page.locator('button[data-delcase]').first().click();
+  await page.locator('button[data-delcase]').first().click();
+  console.log("Deleted from list:", before, "->", await page.evaluate(() => cases.length));
   // mobile
   const m = await browser.newPage({ viewport: { width: 400, height: 860 } });
   await m.addInitScript(() => { window.__testAI = async () => { throw new Error("x"); }; });
