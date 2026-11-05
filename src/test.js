@@ -249,6 +249,8 @@ const conditions = { conditions: [
   await page.click('button[data-view="new"]');
   await page.click('button[data-sample="inconsistent"]');
   await page.waitForSelector(".memo-sec", { timeout: 20000 });
+  await page.waitForFunction(() => cur().run && !cur().run.running, null, { timeout: 20000 });
+  console.log("CH agent step:", await page.evaluate(() => { const st = cur().run.steps.find((x) => x.id === "ch"); const k = cur().checks.find((x) => x.id === "ch"); return st.state + " | " + st.detail + " | check: " + (k ? k.outcome + "/" + k.flag : "none"); }));
   await page.click('button[data-tab="memo"]');
   await page.evaluate(() => { const v = rmView(cur()); v.a.sponsor = "Known sponsor."; v.a.story = "Refinance."; creditQuestions(cur()).forEach((q) => (v.qa[q.key] = "Answered.")); v.rec = "Support"; save(); render(); });
   await page.click('button[data-act="submit-uw"]');
