@@ -1479,6 +1479,58 @@ async function runAgents(c, onlyMemo = false) {
   if (typeof afterRun === "function") { try { await afterRun(c); } catch (e) { /* inbox follow-up is best effort */ } }
 }
 
+/* Rerun one agent on its own. Calculated policy checks are refreshed after any agent; the memo is marked out of date rather than redrafted. */
+async function rerunAgent(c, id) {
+  if (!c.run || c.run.running) return;
+  if (id === "memo") return runAgents(c, true);
+  const imgs = memImages[c.id] || [];
+  const step = c.run.steps.find((x) => x.id === id); if (!step) return;
+  c.run.running = true; c.run.error = null; c.run.cancel = null;
+  const set = (state, extra) => { step.state = state; step.at = nowISO(); if (extra) step.detail = extra; render(); };
+  const policyStep = c.run.steps.find((x) => x.id === "policy");
+  const repolicy = () => {
+    computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c);
+    if (policyStep) policyStep.detail = `${c.checks.filter((k) => k.outcome === "Pass").length} pass, ${c.checks.filter((k) => k.outcome === "Fail").length} fail, ${c.checks.filter((k) => k.outcome === "Unclear").length} unclear`;
+  };
+  try {
+    set("active");
+    if (id === "extract") {
+      const r = await askAI(extractPrompt(c, imgs), imgs, "extract");
+      stopCheck(c);
+      normaliseExtraction(c, r);
+      const found = FIELDS.filter((f) => c.fields[f.key].state === "Found").length;
+      set("done", `${found} of ${FIELDS.length} fields found, ${c.tenants.length} tenant${c.tenants.length === 1 ? "" : "s"}, ${c.consistency.length} consistency flag${c.consistency.length === 1 ? "" : "s"}`);
+      audit(c, "Extraction agent", `Rerun on its own: extracted ${found} of ${FIELDS.length} fields`, "agent");
+      repolicy();
+    } else if (id === "ch") {
+      if (!(typeof chFetch === "function" && settings.chKey)) set("done", "Skipped: no Companies House key. Add one in Change AI provider.");
+      else {
+        await chFetch(c); stopCheck(c);
+        if (c.ch && c.ch.profile) { const n = c.ch.findings.filter((f) => f.tone !== "green").length; set("done", `${c.ch.profile.company_name} (${c.ch.num}), ${c.ch.profile.company_status}. ${n ? n + " point" + (n > 1 ? "s" : "") + " to check" : "No concerns"}.`); }
+        else set("error", "Not checked: " + ((c.ch && c.ch.error) || "unknown error"));
+        audit(c, "Companies House agent", "Rerun on its own", "agent");
+      }
+      repolicy();
+    } else if (id === "policy") {
+      repolicy(); set("done", policyStep.detail);
+      audit(c, "Policy agent", `Rerun on its own: ${c.checks.length} calculated checks`, "agent");
+    } else if (id === "fin") {
+      const fr = await askAI(finPrompt(c), [], "financials");
+      stopCheck(c);
+      computeFinancials(c, fr);
+      set("done", `${c.financials.periods.length} year${c.financials.periods.length === 1 ? "" : "s"} spread, ${c.financials.guarantors.length} guarantor statement${c.financials.guarantors.length === 1 ? "" : "s"}, ${c.financials.flags.length} flag${c.financials.flags.length === 1 ? "" : "s"}`);
+      audit(c, "Financial analysis agent", "Rerun on its own", "agent");
+      repolicy();
+    }
+    if (c.memo && id !== "policy") c.memoStale = true;
+  } catch (e) {
+    step.state = "error"; step.detail = "Rerun stopped: " + (e.message || e);
+    audit(c, "System", `${step.agent} rerun stopped: ` + (e.message || e), "agent");
+  }
+  c.run.running = false;
+  save(); render();
+}
+
 /* ------------------------------------------------------------------ human actions */
 function editField(c, key, newVal) {
   const f = c.fields[key]; const old = f.value;
@@ -1802,7 +1854,8 @@ function caseTiles(c, o) {
 function renderAgents(c) {
   if (!c.run) return "";
   return `<div class="card"><div class="cardhead"><h2>Agents at work</h2>${c.run.running ? `<span class="chip c-amber">Working</span>` : c.run.error ? `<span class="chip c-red">Stopped</span>` : `<span class="chip c-green">Case ready</span>`}</div>
-    <div class="timeline">${c.run.steps.map((s) => `<div class="tl"><span class="time">${s.at ? timeOf(s.at) : ""}</span><div><b>${esc(s.agent)}</b>${s.state === "done" ? `<span class="chip c-green">Done</span>` : s.state === "active" ? `<span class="spin" aria-label="Working"></span>` : s.state === "error" ? `<span class="chip c-red">Stopped</span>` : `<span class="chip c-grey">Waiting</span>`}<p>${esc(s.detail || s.text)}</p></div></div>`).join("")}</div>
+    <div class="timeline">${c.run.steps.map((s) => `<div class="tl"><span class="time">${s.at ? timeOf(s.at) : ""}</span><div><b>${esc(s.agent)}</b>${s.state === "done" ? `<span class="chip c-green">Done</span>` : s.state === "active" ? `<span class="spin" aria-label="Working"></span>` : s.state === "error" ? `<span class="chip c-red">Stopped</span>` : `<span class="chip c-grey">Waiting</span>`}<p>${esc(s.detail || s.text)}</p>${!c.run.running && s.id !== "intake" && (s.state === "done" || s.state === "error") ? `<button class="btn small" type="button" data-act="rerun-one" data-step="${s.id}" title="Run only this agent again">Rerun ${s.id === "memo" ? "the memo agent" : "this agent"}</button>` : ""}</div></div>`).join("")}</div>
+    ${c.memoStale && !c.run.running ? `<p class="hint">The memo was drafted before the latest rerun. Rerun the memo agent to update its written sections.</p>` : ""}
     ${c.run.error ? `<div class="errbox"><b>The run stopped.</b> ${esc(c.run.error)}</div><div class="row"><button class="btn primary" type="button" data-act="rerun">Run the agents again</button><button class="btn" type="button" data-act="settings">Change AI provider</button></div>` : ""}
     ${c.run.running ? `<div><button class="btn small" type="button" data-act="stop-run">Stop the agents</button></div>` : ""}
     ${!c.run.running && !c.run.error ? `<div><button class="btn small" type="button" data-act="rerun">Run all agents again</button></div>` : ""}</div>`;
@@ -2916,6 +2969,7 @@ document.addEventListener("click", async (e) => {
   const c = cur(); if (!c) return;
   const act = t.dataset.act;
   if (act === "rerun") { runAgents(c); }
+  else if (act === "rerun-one") { rerunAgent(c, t.dataset.step); }
   else if (act === "redraft") { runAgents(c, true); }
   else if (act === "stop-run") { if (c.run && c.run.running) { c.run.cancel = "Stopped by " + actor() + "."; t.disabled = true; t.textContent = "Stopping after the current step"; audit(c, actor(), "Stopped the agents"); } }
   else if (act === "delete-case") {
