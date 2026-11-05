@@ -40,4 +40,4 @@ A complete demo pack is in `demo-pack/`. Three test packs (clean, incomplete, in
 
 To rebuild: `cd src && python3 make_samples.py && python3 make_demo_pack.py && python3 build.py`.
 
-The illustrative credit policy comes from the broker submission flow document v0.6, section 7.1. Proposed covenant levels (LTV 75%, ICR 1.35x) are placeholders, not a lender's.
+The illustrative credit policy comes from the broker submission flow document v0.6, section 7.1. Standard covenants (LTV 75%, ICR 1.35x, DSCR 1.15x) are in the illustrative policy as section 7.2, inferred from market norms, not from a lender.

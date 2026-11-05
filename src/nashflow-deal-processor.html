@@ -300,6 +300,9 @@ textarea.ed { width: 100%; min-height: 150px; border: 1px solid var(--line); bor
 
 .obs { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13.5px; }
 
+.termsdoc { margin: 0 0 10px; }
+.termsdoc p { margin: 0 0 10px; }
+
 /* Modals */
 .modal { position: fixed; inset: 0; z-index: 20; background: rgba(15, 16, 20, .45); display: grid; place-items: center;
   padding-block: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-bottom, 0px)); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
@@ -403,6 +406,16 @@ const POLICY = {
   minLoan: 250000, maxLoan: 10000000, minTerm: 3, maxTermIO: 15, maxTermAmort: 25,
   maxLTV: 70, maxLTVSingle: 65, minICR: 1.5, stressRate: 6.5, minDSCR: 1.25,
   minWAULT: 3, concentration: 50, accountsMonths: 12, uwLimit: 1000000,
+  /* 7.2 Standard financial covenants: ongoing tests in the facility agreement, with headroom over the day-one limits */
+  /* 7.3 Pricing grid (illustrative): margin over the reference rate by LTV band, adjusted for risk grade and risk features */
+  pricing: {
+    referenceRate: 4.0, referenceName: "Reference rate (illustrative)", floorMargin: 2.5,
+    bands: [[50, 2.75], [60, 3.1], [65, 3.4], [70, 3.75]],
+    grade: [[3, -0.15], [6, 0], [8, 0.35], [10, 0.75]],
+    adj: { shortWAULT: 0.25, concentration: 0.2, epcBelowC: 0.1, exception: 0.5 },
+    feeSmall: 1.75, feeLarge: 1.5, feeThreshold: 1000000, feeMin: 5000, exitFee: 0, validityDays: 30,
+  },
+  covLTV: 75, covICR: 1.35, covDSCR: 1.15, covTesting: "LTV annually on a lender-instructed valuation; ICR and DSCR quarterly on a 12-month rolling basis",
 };
 const JUDGEMENT_AREAS = [
   { area: "Property type", clause: "7.1 Property type", rule: "Retail, office, industrial and mixed use. Specialist uses (for example petrol stations, hotels) by exception." },
@@ -678,13 +691,27 @@ function save() {
 }
 const cur = () => cases.find((c) => c.id === currentId);
 /* Roles (requirements v1.1): the RM prepares the case, the Underwriter decides every case up to £10m. No Credit Committee. */
-const ROLES = ["Relationship Manager", "Underwriter"];
+const ROLES = ["Relationship Manager", "Underwriter", "Head of Lending"]; // Head of Lending holds the Approve pricing permission
 let currentRole = load("nashflow.role", "Relationship Manager");
 if (!ROLES.includes(currentRole)) currentRole = "Relationship Manager";
 const actor = () => currentRole;
-const STAGES = { rm: "With RM", uw: "With Underwriter", returned: "Returned to RM", approved: "Approved", declined: "Declined" };
+const STAGES = { rm: "With RM", uw: "With Underwriter", returned: "Returned to RM", approved: "Approved, pricing", declined: "Declined", terms: "Terms issued" };
+const SIGNERS = ["Relationship Manager", "Underwriter", "Head of Lending"];
 function stageOf(c) { return c.stage || (c.decision ? (c.decision.choice === "Decline" ? "declined" : "approved") : "rm"); }
-function waitingOn(c) { const s = stageOf(c); return s === "uw" ? "Underwriter" : s === "rm" || s === "returned" ? "Relationship Manager" : null; }
+function waitingList(c) {
+  const s = stageOf(c);
+  if (s === "uw") return ["Underwriter"];
+  if (s === "rm" || s === "returned") return ["Relationship Manager"];
+  if (s === "approved") {
+    const p = c.pricing;
+    if (!p || p.status === "draft") return ["Relationship Manager"];
+    if (p.status === "awaiting") return SIGNERS.filter((r) => !(p.signoffs || {})[r]);
+    return ["Relationship Manager"]; // agreed: RM issues the terms letter
+  }
+  return [];
+}
+function waitingOn(c) { const w = waitingList(c); return w.length ? w.join(" and ") : null; }
+function myTurn(c) { return !!c.memo && waitingList(c).includes(currentRole); }
 function audit(c, who, what, kind = "human") { c.audit.push({ at: nowISO(), who, what, kind }); }
 
 async function newCaseFromFiles(files, title, extra) {
@@ -797,7 +824,7 @@ ${JUDGEMENT_AREAS.map((j) => `   - ${j.area}: ${j.rule}`).join("\n")}
    - financial_analysis: LTV, ICR at the pay rate and under stress, DSCR if amortising, debt yield and the sensitivities, with headroom against policy, and what the accounts show using the FINANCIAL SPREAD (income and profit trend, interest cover from the accounts, gearing, cash, guarantor net worth; mark its ratios as (calculated)). One or two paragraphs, then "- " lines for each red or amber flag with the reason.
    - exit: how the loan is repaid at maturity (refinance or sale), whether the asset should be refinanceable then given lease events before maturity and the LTV and ICR at maturity, and what could stop it.
    - risks: 5 to 8 "- Risk: ... Mitigant: ..." lines, most important first, specific to this deal.
-   - covenants: proposed financial covenants using the SENSITIVITIES (LTV and ICR levels with headroom), then information undertakings (annual accounts, quarterly rent roll, lender's right to revalue). Say the levels are proposed.
+   - covenants: the financial covenants from the credit policy, section 7.2 (LTV no more than ${COVENANTS.ltv}%, ICR at least ${COVENANTS.icr}x, DSCR at least ${COVENANTS.dscr}x if amortising; ${POLICY.covTesting}), with the headroom this deal has against each from the SENSITIVITIES, citing the policy as (policy 7.2); then information undertakings (annual accounts, quarterly rent roll, lender's right to revalue).
    - conditions: a "**Conditions precedent**" list and a "**Conditions subsequent**" list, specific to this deal (for example lender-instructed RICS valuation, report on title, redemption statement, KYC and AML on directors and PSCs, personal guarantees with independent legal advice, buildings insurance with the lender noted, a new lease for a tenant holding over).
 3. broker_request: if anything is Not present, Not confident, out of date or inconsistent, draft one short polite email to the broker (first name) listing each item needed as "- " lines, signed "[Your name]". Otherwise "".
 
@@ -963,7 +990,7 @@ function computeChecks(c) {
 }
 
 /* ------------------------------------------------------------------ sensitivities and covenant headroom (calculated) */
-const COVENANTS = { ltv: 75, icr: 1.35 }; // illustrative proposed covenant levels, not from a lender
+const COVENANTS = { ltv: POLICY.covLTV, icr: POLICY.covICR, dscr: POLICY.covDSCR }; // from the credit policy, section 7.2 (illustrative)
 function computeAnalysis(c) {
   const out = []; const add = (label, value, note) => out.push({ label, value, note });
   const L = num(c, "loan_amount"), V = num(c, "property_value"), R = num(c, "annual_rent"), rate = num(c, "interest_rate_pct"), T = num(c, "loan_term_years");
@@ -979,12 +1006,12 @@ function computeAnalysis(c) {
     const withRent = c.tenants.filter((t) => t.annual_rent > 0);
     if (withRent.length > 1) { const top = withRent.slice().sort((a, b) => b.annual_rent - a.annual_rent)[0]; add("ICR if the largest tenant leaves", times((R - top.annual_rent) / interest), `Without ${top.name} (${money(top.annual_rent)}).`); }
     add("Break-even occupancy", pct((interest / R) * 100, 0), "Share of the passing rent needed to pay interest.");
-    add("Rent fall before ICR covenant breach", pct(Math.max(0, (1 - (COVENANTS.icr * interest) / R) * 100), 0), `Against a proposed ICR covenant of ${COVENANTS.icr}x.`);
+    add("Rent fall before ICR covenant breach", pct(Math.max(0, (1 - (COVENANTS.icr * interest) / R) * 100), 0), `Against the policy ICR covenant of ${COVENANTS.icr}x.`);
   }
   if (L != null && V != null) {
     add("LTV if value falls 10%", pct((L / (V * 0.9)) * 100), "");
     add("LTV if value falls 20%", pct((L / (V * 0.8)) * 100), "");
-    add("Value fall before LTV covenant breach", pct(Math.max(0, (1 - L / (COVENANTS.ltv / 100) / V) * 100), 0), `Against a proposed LTV covenant of ${COVENANTS.ltv}%.`);
+    add("Value fall before LTV covenant breach", pct(Math.max(0, (1 - L / (COVENANTS.ltv / 100) / V) * 100), 0), `Against the policy LTV covenant of ${COVENANTS.ltv}%.`);
   }
   if (T != null && c.tenants.length && R) {
     const end = new Date(); end.setFullYear(end.getFullYear() + T);
@@ -1044,7 +1071,7 @@ function systemSections(c) {
     external: "Companies House, Land Registry and credit bureau checks are not connected in this prototype. In the product, Companies House is checked live and Land Registry and bureau results are mocked for the MVP.",
     policy: `Assessed against the ${POLICY.name} (${POLICY.version}). Numeric limits are calculated, not judged by the AI.\n\n${pol}`,
     recommendation: rec,
-    sensitivity: "Calculated in code from the extracted figures. Proposed covenant levels (LTV " + COVENANTS.ltv + "%, ICR " + COVENANTS.icr + "x) are illustrative, not from a lender.\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate."),
+    sensitivity: "Calculated in code from the extracted figures. Covenant levels come from the credit policy, section 7.2 Standard financial covenants: LTV no more than " + COVENANTS.ltv + "%, ICR at least " + COVENANTS.icr + "x, DSCR at least " + COVENANTS.dscr + "x if amortising. " + POLICY.covTesting + ".\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate."),
   };
 }
 function refreshSystemSections(c) {
@@ -1094,7 +1121,7 @@ function conditionsPrompt(c) {
   const tenants = (c.tenants || []).map((t) => `- ${t.name}: ${money(t.annual_rent)}, lease end ${t.lease_end || "not clear"}${t.break_date ? ", break " + t.break_date : ""}${t.note ? " (" + t.note + ")" : ""}`).join("\n") || "- None listed";
   return `You are the conditions agent in NashFlow, a commercial property lending tool for a UK specialist lender. Propose the conditions for this loan for the Underwriter to accept or reject. The Underwriter decides; you suggest.
 
-Use the lender's base set below where it applies to this case, and add case-specific conditions for the risks in this case (for example a vacant unit, a tenant holding over, a short WAULT, a low EPC, a policy exception, a mismatch in the figures). Do not include base conditions that do not apply (for example a redemption statement on a purchase). Keep each condition to one sentence in plain UK English. For covenants, use the proposed levels: LTV ${COVENANTS.ltv}% maximum, ICR ${COVENANTS.icr}x minimum.
+Use the lender's base set below where it applies to this case, and add case-specific conditions for the risks in this case (for example a vacant unit, a tenant holding over, a short WAULT, a low EPC, a policy exception, a mismatch in the figures). Do not include base conditions that do not apply (for example a redemption statement on a purchase). Keep each condition to one sentence in plain UK English. For financial covenants, use the levels in the lender's credit policy, section 7.2: LTV ${COVENANTS.ltv}% maximum, ICR ${COVENANTS.icr}x minimum, DSCR ${COVENANTS.dscr}x minimum if amortising, tested as follows: ${POLICY.covTesting}.
 
 Base set:
 ${BASE_CONDITIONS.map(([t, x], i) => `B${i + 1}. [${t}] ${x}`).join("\n")}
@@ -1193,6 +1220,33 @@ function finBlock(c) {
   const rat = f.ratios.map((r) => `- ${r.label} (calculated): ${f.periods.map((p, i) => `${p.label} ${r.values[i]}`).join(", ")}`);
   const g = f.guarantors.map((x) => `- ${x.name}: assets ${money(x.assets)}, liabilities ${money(x.liabilities)}, net worth ${money(x.net_worth)}${x.liquid != null ? ", liquid " + money(x.liquid) : ""}${x.source ? ` [${x.source.doc} p${x.source.page || 1}]` : ""}`);
   return [`Entity: ${f.entity}. Basis: ${f.basis}.`, ...rows, ...rat, ...(g.length ? ["Guarantors:", ...g] : []), ...(f.flags.length ? ["Flags:", ...f.flags.map((x) => "- " + x.text)] : [])].join("\n");
+}
+
+/* ------------------------------------------------------------------ pricing (policy 7.3), calculated in code */
+function gridPricing(c) {
+  const P = POLICY.pricing; const L = num(c, "loan_amount"); const V = num(c, "property_value");
+  const ltv = L != null && V ? (L / V) * 100 : null;
+  const lines = [];
+  const band = ltv == null ? P.bands[P.bands.length - 1] : (P.bands.find((b) => ltv <= b[0] + 1e-9) || P.bands[P.bands.length - 1]);
+  lines.push({ label: ltv == null ? "LTV band (LTV not known, top band used)" : `LTV band up to ${band[0]}% (LTV ${ltv.toFixed(1)}%)`, add: band[1], base: true });
+  const g = c.decision && +c.decision.grade;
+  if (g) { const gb = P.grade.find((x) => g <= x[0]); if (gb && gb[1]) lines.push({ label: `Risk grade ${g}`, add: gb[1] }); }
+  const k = (id) => c.checks.find((x) => x.id === id);
+  const w = k("wault"); if (w && w.metric != null && w.metric < POLICY.minWAULT) lines.push({ label: `WAULT under ${POLICY.minWAULT} years`, add: P.adj.shortWAULT });
+  const cn = k("conc"); if (cn && cn.flag === "amber") lines.push({ label: "One tenant pays over half the rent", add: P.adj.concentration });
+  const e = k("epc"); if (e && "DE".includes(String(e.value))) lines.push({ label: `EPC ${e.value} (below C)`, add: P.adj.epcBelowC });
+  if (c.rec && c.rec.exceptions.length) lines.push({ label: "Approved as a policy exception", add: P.adj.exception });
+  const margin = Math.max(P.floorMargin, lines.reduce((s2, x) => s2 + x.add, 0));
+  const feePct = L != null && L >= P.feeThreshold ? P.feeLarge : P.feeSmall;
+  return { margin: +margin.toFixed(2), lines, feePct, exitPct: P.exitFee, ltv };
+}
+function priceFigures(c, p) {
+  const P = POLICY.pricing; const L = num(c, "loan_amount"); const R = num(c, "annual_rent");
+  const rate = P.referenceRate + p.margin;
+  const fee = L != null ? Math.max(P.feeMin, (L * p.feePct) / 100) : null;
+  const interest = L != null ? (L * rate) / 100 : null;
+  const icr = interest && R != null ? R / interest : null;
+  return { rate, fee, interest, icr, icrOk: icr == null ? null : icr >= POLICY.minICR };
 }
 
 /* ------------------------------------------------------------------ the agent run */
@@ -1338,8 +1392,8 @@ function missingCount(c) { return c.fields ? FIELDS.filter((f) => { const x = c.
 function renderNav() {
   const c = cur();
   const item = (id, label, badge, disabled) => `<button class="nav" type="button" data-view="${id}" ${view === id ? 'aria-current="page"' : ""} ${disabled ? "disabled" : ""}><span>${label}</span>${badge != null ? `<span class="badge">${badge}</span>` : ""}</button>`;
-  $("#roleBox").innerHTML = `<div class="k">Working as</div><div class="roleseg">${ROLES.map((r) => `<button type="button" data-role="${esc(r)}" aria-pressed="${currentRole === r}">${r === "Relationship Manager" ? "Relationship Manager" : r}</button>`).join("")}</div><small>${currentRole === "Underwriter" ? "Reviews, sets conditions and decides." : "Checks the agents' work, prepares the case and submits it."}</small>`;
-  const mine = cases.filter((x) => waitingOn(x) === currentRole && x.memo).length;
+  $("#roleBox").innerHTML = `<div class="k">Working as</div><div class="roleseg">${ROLES.map((r) => `<button type="button" data-role="${esc(r)}" aria-pressed="${currentRole === r}">${r === "Relationship Manager" ? "Relationship Manager" : r}</button>`).join("")}</div><small>${currentRole === "Underwriter" ? "Reviews, sets conditions and decides." : currentRole === "Head of Lending" ? "Holds the Approve pricing permission. Signs off pricing." : "Checks the agents' work, prepares the case and submits it."}</small>`;
+  const mine = cases.filter((x) => myTurn(x)).length;
   $("#navCases").innerHTML = `<div class="navlabel">Cases</div>${item("new", "New case")}${item("cases", "My cases", mine || cases.length)}${item("case", "Case management", null, !c)}`;
   $("#navAdmin").innerHTML = `<div class="navlabel">Administration</div>${item("inbox", "Deals inbox")}${item("policy", "Credit policies")}${item("agents", "AI governance")}`;
 }
@@ -1364,7 +1418,7 @@ function caseRow(c) {
   const rec = c.rec && c.memo ? `<span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label.split(" (")[0])}</span>` : c.run && c.run.error ? `<span class="chip c-red">Run stopped</span>` : `<span class="chip c-grey">Pending</span>`;
   return `<tr><td class="num">${dateOf(c.createdAt)} ${timeOf(c.createdAt)}<span class="sub">uploaded</span></td>
     <td><b>${esc(c.title)}</b>${c.source && c.source.kind === "email" ? ` <span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? ` <span class="chip c-red">Broker not replying</span>` : ""}<span class="sub">${esc(c.ref)}${c.fields && usable(c, "broker") ? " · " + esc(usable(c, "broker")) : ""}</span></td>
-    <td class="fv">${shortMoney(L)}</td><td>${complete}</td><td>${consistent}</td><td>${esc(STAGES[stageOf(c)])}${c.memo && waitingOn(c) === currentRole ? ` <span class="chip c-red">Your action</span>` : c.memo && waitingOn(c) ? `<span class="sub">Waiting on ${esc(waitingOn(c))}</span>` : ""}</td><td>${rec}</td>
+    <td class="fv">${shortMoney(L)}</td><td>${complete}</td><td>${consistent}</td><td>${esc(STAGES[stageOf(c)])}${myTurn(c) ? ` <span class="chip c-red">Your action</span>` : c.memo && waitingOn(c) ? `<span class="sub">Waiting on ${esc(waitingOn(c))}</span>` : ""}</td><td>${rec}</td>
     <td><div class="row" style="flex-wrap:nowrap"><button class="btn primary small" type="button" data-case="${c.id}">Open case</button><button class="btn small" type="button" data-delcase="${c.id}" title="Delete this case">Delete</button></div></td></tr>`;
 }
 function renderCases() {
@@ -1372,8 +1426,8 @@ function renderCases() {
   const cc = done.filter((c) => c.rec.complete && c.rec.consistent).length;
   const more = done.filter((c) => c.rec.kind === "more").length;
   const exc = done.filter((c) => c.rec.kind === "escalate" || c.rec.kind === "decline").length;
-  const mine = done.filter((c) => waitingOn(c) === currentRole).length;
-  return pageHead("My cases", "My cases", currentRole === "Underwriter" ? "Cases the Relationship Managers have submitted to you, and the ones you have decided. Cases waiting on you are marked." : "Every deal pack the agents have read, with what they found. You check the agents' work, prepare the case and submit it to the Underwriter.") +
+  const mine = done.filter((c) => myTurn(c)).length;
+  return pageHead("My cases", "My cases", currentRole === "Underwriter" ? "Cases the Relationship Managers have submitted to you, and the ones you have decided. Cases waiting on you are marked." : currentRole === "Head of Lending" ? "Approved cases with pricing waiting for your sign-off are marked." : "Every deal pack the agents have read, with what they found. You check the agents' work, prepare the case and submit it to the Underwriter.") +
     `<div class="stats">
       <div class="stat"><b>${mine}</b><span>Waiting on you</span><small>As ${esc(currentRole)}</small></div>
       <div class="stat"><b>${cc}</b><span>Complete and consistent</span><small>Of ${cases.length} in this browser</small></div>
@@ -1396,13 +1450,13 @@ function renderCaseView(c) {
   const sub = [broker ? "From " + broker : "Uploaded", "received " + dateOf(c.createdAt) + " " + timeOf(c.createdAt), ready ? (miss || mism ? [miss ? miss + " missing" : "", mism ? mism + " mismatch" : ""].filter(Boolean).join(", ") : "complete and consistent") : "agents reading", "policy: illustrative UK market standard"].join(" · ");
   const rb = ready ? String(usable(c, "repayment_basis") || "").toLowerCase() : "";
   const recTone = c.rec && c.memo ? { approve: "green", decline: "red", more: "amber", escalate: "blue" }[c.rec.kind] : "";
-  const tabs = [["memo", "Credit memo"], ["source", "Source check", toCheck ? `<span class="chip c-amber">${toCheck} to check</span>` : ""], ["fin", "Financials", c.financials && c.financials.flags.length ? `<span class="chip c-amber">${c.financials.flags.length} flag${c.financials.flags.length > 1 ? "s" : ""}</span>` : ""], ["policy", "Policy checks", flags ? `<span class="chip c-amber">${flags} flag${flags > 1 ? "s" : ""}</span>` : ""], ["decision", "Decision"], ["audit", "Audit"]];
+  const tabs = [["memo", "Credit memo"], ["source", "Source check", toCheck ? `<span class="chip c-amber">${toCheck} to check</span>` : ""], ["fin", "Financials", c.financials && c.financials.flags.length ? `<span class="chip c-amber">${c.financials.flags.length} flag${c.financials.flags.length > 1 ? "s" : ""}</span>` : ""], ["policy", "Policy checks", flags ? `<span class="chip c-amber">${flags} flag${flags > 1 ? "s" : ""}</span>` : ""], ["decision", "Decision"], ["pricing", "Pricing and terms", c.pricing && c.pricing.status === "awaiting" ? `<span class="chip c-amber">Sign-off</span>` : c.terms && c.terms.issued ? `<span class="chip c-green">Issued</span>` : ""], ["audit", "Audit"]];
   let body;
   if (!ready && currentTab !== "audit") body = renderWorking(c);
-  else body = { memo: renderMemoTab, source: renderSource, fin: renderFinancials, policy: renderPolicyTab, decision: renderDecision, audit: renderAudit }[currentTab](c);
+  else body = { memo: renderMemoTab, source: renderSource, fin: renderFinancials, policy: renderPolicyTab, decision: renderDecision, pricing: renderPricing, audit: renderAudit }[currentTab](c);
   return pageHead("Case management", "Case management") + `
   <div class="casecard">
-    <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${c.memo && waitingOn(c) === currentRole ? `<span class="chip c-red">Your action</span>` : ""}${c.source && c.source.kind === "email" ? `<span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? `<span class="chip c-red">Broker not replying</span>` : ""}<span style="flex:1"></span><button class="btn small" type="button" data-act="delete-case">Delete case</button></div>
+    <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${myTurn(c) ? `<span class="chip c-red">Your action</span>` : ""}${c.source && c.source.kind === "email" ? `<span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? `<span class="chip c-red">Broker not replying</span>` : ""}<span style="flex:1"></span><button class="btn small" type="button" data-act="delete-case">Delete case</button></div>
     <div class="subline">${esc(sub)}</div>
     <div class="tiles">
       ${tile("Facility", shortMoney(L), T != null ? `${T} years${rb ? ", " + esc(rb) : ""}` : "")}
@@ -1600,7 +1654,7 @@ function renderPolicyTab(c) {
   return `<div class="stack">
     ${flagCards.length ? `<div class="flags">${flagCards.map((f) => `<div class="flag ${f.tone}"><div class="row"><span class="chip ${f.tone === "red" ? "c-red" : f.tone === "amber" ? "c-amber" : "c-green"}">${f.label}</span><b>${esc(f.title)}</b></div><p>${esc(f.text)}</p>${f.refs.length ? `<div class="row">${f.refs.map((r) => refChip(r.doc, r.page, r.quote)).join("")}</div>` : ""}</div>`).join("")}</div>` : ""}
     <div class="card"><h2>Calculated checks</h2><p class="hint">Worked out in code from the extracted figures, so the answer is exact and repeatable. The AI does not judge these. ${esc(POLICY.name)}, ${esc(POLICY.version)}.</p><div class="tablewrap"><table class="t"><thead><tr><th>Provision</th><th>Policy</th><th>Case</th><th>Outcome</th><th>Explanation</th></tr></thead><tbody>${c.checks.map(row).join("")}</tbody></table></div></div>
-    ${(c.analysis || []).length ? `<div class="card"><h2>Sensitivities and covenant headroom</h2><p class="hint">Calculated in code. Proposed covenants (LTV ${COVENANTS.ltv}%, ICR ${COVENANTS.icr}x) are illustrative, not from a lender.</p><div class="tablewrap"><table class="t"><thead><tr><th>Measure</th><th>Result</th><th>Comment</th></tr></thead><tbody>${c.analysis.map((a) => `<tr><td><b>${esc(a.label)}</b></td><td class="fv">${esc(a.value)}</td><td>${esc(a.note)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
+    ${(c.analysis || []).length ? `<div class="card"><h2>Sensitivities and covenant headroom</h2><p class="hint">Calculated in code. Covenants from the credit policy, section 7.2: LTV ${COVENANTS.ltv}%, ICR ${COVENANTS.icr}x.</p><div class="tablewrap"><table class="t"><thead><tr><th>Measure</th><th>Result</th><th>Comment</th></tr></thead><tbody>${c.analysis.map((a) => `<tr><td><b>${esc(a.label)}</b></td><td class="fv">${esc(a.value)}</td><td>${esc(a.note)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
     <div class="card"><h2>Judgement areas</h2><p class="hint">Assessed by the memo agent and explained, for a person to read and agree or not.</p>${c.judgements.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Provision</th><th>Policy</th><th></th><th>Outcome</th><th>Explanation</th></tr></thead><tbody>${c.judgements.map(row).join("")}</tbody></table></div>` : `<p class="hint">Not assessed yet.</p>`}</div>
   </div>`;
 }
@@ -1621,8 +1675,8 @@ function decisionSummary(c) {
 }
 function flowCard(c) {
   const st = stageOf(c);
-  const steps = [["rm", "Relationship Manager prepares the case"], ["uw", "Underwriter reviews and decides"], ["done", "Decision recorded"]];
-  const at = st === "rm" || st === "returned" ? 0 : st === "uw" ? 1 : 2;
+  const steps = [["rm", "Relationship Manager prepares the case"], ["uw", "Underwriter reviews and decides"], ["pricing", "Pricing agreed by RM, Underwriter and Head of Lending"], ["terms", "Terms letter issued to the broker"]];
+  const at = st === "rm" || st === "returned" ? 0 : st === "uw" ? 1 : st === "approved" ? 2 : st === "terms" ? 4 : 1;
   const hist = (c.handoffs || []).map((h) => `<li><span class="note">${dateOf(h.at)} ${timeOf(h.at)}</span> <b>${esc(h.who)}</b>: ${esc(h.what)}${h.note ? ` <span class="sub">"${esc(h.note)}"</span>` : ""}</li>`).join("");
   return `<div class="card"><h2>Case flow</h2><ol class="flow">${steps.map(([id, t], i) => `<li class="${i < at ? "done" : i === at ? "now" : ""}">${esc(t)}${i === at && st === "returned" ? " (returned for more information)" : ""}</li>`).join("")}</ol>
     ${hist ? `<div class="label">Hand-offs</div><ul class="handoffs">${hist}</ul>` : ""}
@@ -1653,7 +1707,7 @@ function renderDecision(c) {
   const ret = st === "returned" && c.returned ? `<div class="errbox"><b>Returned by the Underwriter, ${dateOf(c.returned.at)} ${timeOf(c.returned.at)}.</b> ${esc(c.returned.reason)}</div>` : "";
   const switchTo = (r, why) => `<div class="card"><h2>${esc(why)}</h2><p class="hint">In the product each person sees only their own work. In this prototype, switch role to carry on.</p><div><button class="btn primary" type="button" data-role="${esc(r)}">Switch to ${esc(r)}</button></div></div>`;
   let main;
-  if (st === "approved" || st === "declined") main = decisionSummary(c) + (currentRole === "Underwriter" ? "" : conditionsCard(c, false));
+  if (st === "approved" || st === "declined" || st === "terms") main = decisionSummary(c) + (st !== "declined" ? `<div class="card"><h2>Next: pricing and terms</h2><p class="hint">${c.terms && c.terms.issued ? "Terms letter issued." : c.pricing && c.pricing.status === "agreed" ? "Pricing agreed. The RM can issue the terms letter." : c.pricing && c.pricing.status === "awaiting" ? "Pricing is waiting for sign-off: " + esc(waitingOn(c) || "") + "." : "The RM proposes pricing from the lender's grid, then the Underwriter and Head of Lending sign it off."}</p><div><button class="btn primary small" type="button" data-tab="pricing">Go to pricing and terms</button></div></div>` : "") + (currentRole === "Underwriter" ? "" : conditionsCard(c, false));
   else if (currentRole === "Relationship Manager") {
     if (st === "uw") main = sub + `<div class="card"><h2>With the Underwriter</h2><p class="hint">You submitted this case. You can still read it and add comments. The Underwriter can return it to you for more information.</p></div>` + switchTo("Underwriter", "Continue as the Underwriter");
     else {
@@ -1666,6 +1720,8 @@ function renderDecision(c) {
         <div class="field"><label for="rmNote">Note to the Underwriter</label><textarea class="ed" id="rmNote" placeholder="What the Underwriter should know: your view, open points, anything you've checked with the broker"></textarea></div>
         <div class="row"><button class="btn primary" type="button" data-act="submit-uw">Submit to the Underwriter</button><span class="note">Open items are shown to the Underwriter. The conditions agent runs when you submit.</span></div></div>`;
     }
+  } else if (currentRole !== "Underwriter") {
+    main = sub + `<div class="card"><h2>Credit decision</h2><p class="hint">Only the Underwriter decides credit. The ${esc(currentRole)} signs off pricing once the case is approved.</p></div>` + (st === "uw" ? switchTo("Underwriter", "Continue as the Underwriter") : "");
   } else {
     if (st !== "uw") main = ret + switchTo("Relationship Manager", "The Relationship Manager hasn't submitted this case yet");
     else {
@@ -1687,6 +1743,86 @@ function renderDecision(c) {
   }
   return `<div class="grid2"><div class="stack">${recbar}${main}</div>${side}</div>`;
 }
+const pctTxt = (x, d = 2) => (x == null || !isFinite(x) ? "-" : Number(x).toFixed(d).replace(/\.?0+$/, "") + "%");
+function termsText(c) {
+  const F = (k) => usable(c, k); const p = c.pricing; const f = priceFigures(c, p); const P = POLICY.pricing;
+  const L = num(c, "loan_amount"); const T = num(c, "loan_term_years");
+  const acc = (c.conditions || []).filter((x) => x.status === "accepted");
+  const group = (types) => acc.filter((x) => types.includes(x.type)).map((x) => "- " + x.text).join("\n");
+  const today = new Date().toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const until = new Date(Date.now() + P.validityDays * 864e5).toLocaleDateString("en-GB", { day: "numeric", month: "long", year: "numeric" });
+  const broker = F("broker"); const bname = c.source && c.source.from ? brokerName(c.source.from) : broker || "the broker";
+  return [
+    `**Indicative terms: ${F("borrower_name") || c.title}**`,
+    `Demo lender (prototype) · ${today} · Reference ${c.ref}`,
+    c.source && c.source.from ? `Dear ${bname.split(" ")[0]},` : broker ? `Dear ${broker} team,` : "Dear colleague,",
+    `Thank you for introducing this loan. We are pleased to set out the indicative terms on which we would be willing to lend, subject to the conditions below. These terms are not an offer of finance. They are subject to contract, a satisfactory valuation, legal due diligence and final credit approval.`,
+    `**Facility**`,
+    [`- Borrower: ${F("borrower_name") || "to be confirmed"}${F("company_number") ? " (company " + F("company_number") + ")" : ""}`,
+     `- Property: ${F("property_address") || "to be confirmed"}`,
+     `- Facility: ${money(L)} commercial property investment loan`,
+     `- Purpose: ${F("purpose") || "to be confirmed"}`,
+     `- Term: ${T != null ? T + " years" : "to be confirmed"}`,
+     `- Repayment: ${F("repayment_basis") || "Interest only"}`].join("\n"),
+    `**Pricing**`,
+    [`- Interest rate: ${pctTxt(f.rate)} a year (${P.referenceName} of ${pctTxt(P.referenceRate)} plus a margin of ${pctTxt(p.margin)})`,
+     `- Arrangement fee: ${pctTxt(p.feePct)} of the facility (${money(f.fee)}), payable on completion`,
+     `- Exit fee: ${p.exitPct ? pctTxt(p.exitPct) + " of the amount repaid" : "none"}`,
+     `- The borrower pays the lender's valuation and legal costs`].join("\n"),
+    `**Security**`,
+    group(["Condition precedent"]).split("\n").filter((l) => /charge|debenture|guarantee/i.test(l)).join("\n") || "- First legal charge over the property and a debenture from the borrower",
+    `**Financial covenants**`,
+    [`- Loan to value no more than ${COVENANTS.ltv}%, tested annually on a lender-instructed valuation`, `- Interest cover at least ${COVENANTS.icr}x, tested quarterly`].concat(/amortis/i.test(F("repayment_basis") || "") ? [`- Debt service cover at least ${COVENANTS.dscr}x, tested quarterly`] : [])
+      .concat(acc.filter((x) => x.type === "Financial covenant" && !/ltv|loan to value|icr|interest cover|dscr|debt service/i.test(x.text)).map((x) => "- " + x.text)).join("\n"),
+    `**Conditions before drawdown**`,
+    group(["Condition precedent"]) || "- As set out in the facility letter",
+    acc.some((x) => x.type === "Condition subsequent") ? `**Conditions after drawdown**` : "",
+    group(["Condition subsequent"]),
+    acc.some((x) => ["Information covenant", "Undertaking"].includes(x.type)) ? `**Undertakings**` : "",
+    group(["Information covenant", "Undertaking"]),
+    `These indicative terms are valid until ${until}. To proceed, please ask the borrower to sign and return them, and we will instruct the valuation and legal work.`,
+    `Yours sincerely,`,
+    `The lending team, Demo lender`,
+  ].filter(Boolean).join("\n\n");
+}
+function renderPricing(c) {
+  const st = stageOf(c);
+  if (!c.decision || c.decision.choice !== "Approve") return `<div class="card"><h2>Pricing and terms</h2><p class="hint">Pricing opens once the Underwriter approves the case.</p></div>`;
+  const g = gridPricing(c); const P = POLICY.pricing;
+  const p = c.pricing || { margin: g.margin, feePct: g.feePct, exitPct: g.exitPct, reason: "", status: "draft", signoffs: {} };
+  const f = priceFigures(c, p); const fg = priceFigures(c, g);
+  const editable = currentRole === "Relationship Manager" && p.status === "draft";
+  const grid = `<div class="card"><h2>Pricing grid</h2><p class="hint">From the lender's pricing grid, credit policy section 7.3 (illustrative). Calculated in code.</p>
+    <div class="tablewrap bare"><table class="t"><tbody>${g.lines.map((x) => `<tr><td>${esc(x.label)}</td><td class="num">${x.base ? "" : x.add > 0 ? "+" : ""}${pctTxt(x.add)}</td></tr>`).join("")}
+    <tr><td><b>Grid margin</b>${g.margin === P.floorMargin ? `<span class="sub">At the ${pctTxt(P.floorMargin)} floor</span>` : ""}</td><td class="num"><b>${pctTxt(g.margin)}</b></td></tr>
+    <tr><td>${esc(P.referenceName)}</td><td class="num">${pctTxt(P.referenceRate)}</td></tr>
+    <tr><td><b>Grid rate</b></td><td class="num"><b>${pctTxt(fg.rate)}</b></td></tr>
+    <tr><td>Arrangement fee</td><td class="num">${pctTxt(g.feePct)} (${money(fg.fee)})</td></tr></tbody></table></div></div>`;
+  const icrLine = f.icr == null ? "" : `<p class="${f.icrOk ? "hint" : "errbox"}">Interest cover at the priced rate: <b>${f.icr.toFixed(2)}x</b> (${money(f.interest)} interest a year). ${f.icrOk ? `Meets the ${POLICY.minICR}x policy minimum.` : `Below the ${POLICY.minICR}x policy minimum, so the Underwriter should check this before signing off.`}</p>`;
+  const prop = `<div class="card"><div class="cardhead"><h2>Proposed pricing</h2><span class="chip ${p.status === "agreed" ? "c-green" : p.status === "awaiting" ? "c-amber" : "c-grey"}">${p.status === "agreed" ? "Agreed" : p.status === "awaiting" ? "Waiting for sign-off" : "Draft"}</span></div>
+    ${p.sentBack && p.status === "draft" ? `<div class="errbox"><b>Sent back by ${esc(p.sentBack.by)}.</b> ${esc(p.sentBack.reason)}</div>` : ""}
+    ${editable ? `<div class="cfg"><label for="prMargin">Margin over the reference rate (%)</label><input id="prMargin" type="number" step="0.05" value="${p.margin}"><label for="prFee">Arrangement fee (%)</label><input id="prFee" type="number" step="0.25" value="${p.feePct}"><label for="prExit">Exit fee (%)</label><input id="prExit" type="number" step="0.25" value="${p.exitPct}"><label for="prReason">Reason, if different from the grid</label><input id="prReason" type="text" value="${esc(p.reason || "")}" placeholder="For example, competitive pressure from another lender"></div>`
+      : `<div class="tablewrap bare"><table class="t"><tbody><tr><td>Margin</td><td class="num">${pctTxt(p.margin)}${p.margin !== g.margin ? ` <span class="chip c-amber">Grid ${pctTxt(g.margin)}</span>` : ""}</td></tr><tr><td><b>Interest rate</b></td><td class="num"><b>${pctTxt(f.rate)}</b></td></tr><tr><td>Arrangement fee</td><td class="num">${pctTxt(p.feePct)} (${money(f.fee)})</td></tr><tr><td>Exit fee</td><td class="num">${p.exitPct ? pctTxt(p.exitPct) : "None"}</td></tr></tbody></table></div>${p.reason ? `<p class="hint">Reason: ${esc(p.reason)}</p>` : ""}`}
+    ${icrLine}
+    ${editable ? `<div class="row"><button class="btn primary" type="button" data-act="price-submit">Submit pricing for sign-off</button><span class="note" id="prMsg"></span></div>` : ""}
+    ${currentRole !== "Relationship Manager" && p.status === "draft" ? `<p class="note">Waiting for the RM to propose pricing.</p>` : ""}</div>`;
+  const signs = `<div class="card"><h2>Pricing sign-off</h2><p class="hint">Three people sign off pricing: the RM who proposes it, the Underwriter for credit, and the Head of Lending, who holds the Approve pricing permission. Any change to the pricing restarts the sign-off.</p>
+    ${SIGNERS.map((r) => { const so = (p.signoffs || {})[r]; return `<div class="signoff"><div><b>${esc(r)}</b><span>${r === "Relationship Manager" ? "Proposes" : r === "Underwriter" ? "Credit" : "Commercial (Approve pricing permission)"}</span></div>${so ? `<span class="chip c-green">Signed ${dateOf(so.at)} ${timeOf(so.at)}</span>` : p.status === "awaiting" ? `<span class="chip c-amber">Waiting</span>` : `<span class="chip c-grey">Not yet</span>`}</div>`; }).join("")}
+    ${p.status === "awaiting" && SIGNERS.includes(currentRole) && !(p.signoffs || {})[currentRole] ? `<div class="field"><label for="prBack">Comment (needed to send back)</label><input id="prBack" type="text"></div><div class="row"><button class="btn primary" type="button" data-act="price-sign">Approve pricing as ${esc(currentRole)}</button><button class="btn" type="button" data-act="price-back">Send back to the RM</button><span class="note" id="prMsg"></span></div>` : ""}
+    ${p.status === "awaiting" && !SIGNERS.filter((r) => !(p.signoffs || {})[r]).includes(currentRole) ? `<p class="note">Waiting for: ${esc(waitingOn(c) || "")}. Switch role to sign as them.</p>` : ""}</div>`;
+  let terms = "";
+  if (p.status === "agreed") {
+    const t = c.terms;
+    terms = `<div class="card"><div class="cardhead"><h2>Terms letter</h2>${t && t.issued ? `<span class="chip c-green">Issued ${dateOf(t.issued.at)} ${timeOf(t.issued.at)}</span>` : t ? `<span class="chip c-amber">Draft</span>` : ""}</div>
+      ${!t ? `<p class="hint">Generated from the approved case: facility, agreed pricing, security, covenants and the conditions the Underwriter accepted.</p>${currentRole === "Relationship Manager" ? `<div><button class="btn primary" type="button" data-act="terms-make">Generate the terms letter</button></div>` : `<p class="note">The RM generates and issues the terms letter.</p>`}`
+      : `<div class="pagetext paper termsdoc">${renderRich(t.text)}</div>
+        <div class="row"><button class="btn small" type="button" data-act="terms-print">Print or save as PDF</button><button class="btn small" type="button" data-act="terms-word">Download as Word</button><button class="btn small" type="button" data-act="terms-copy">Copy</button>${currentRole === "Relationship Manager" && !t.issued ? `<button class="btn small" type="button" data-act="terms-make">Regenerate</button>${c.source && c.source.kind === "email" && settings.inboxUrl ? `<button class="btn primary small" type="button" data-act="terms-email">Email to the broker</button>` : ""}<button class="btn ${c.source && c.source.kind === "email" && settings.inboxUrl ? "" : "primary "}small" type="button" data-act="terms-issue">Mark as issued</button>` : ""}</div>`}</div>`;
+  }
+  return `<div class="grid2"><div class="stack">${prop}${signs}${terms}</div><div class="stack">${grid}${flowCard(c)}</div></div>`;
+}
+function wordDoc(title, html) {
+  return `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word"><head><meta charset="utf-8"><title>${esc(title)}</title><style>body{font-family:Arial,sans-serif;font-size:11pt;line-height:1.4}p{margin:0 0 8pt}ul{margin:0 0 8pt 18pt}</style></head><body>${html}</body></html>`;
+}
 function renderAudit(c) {
   return `<div class="card"><h2>Audit trail</h2><p class="hint">Every agent and human action on this case, oldest first. Policy version: ${esc(POLICY.version)}.</p><ul class="audit">${c.audit.map((a) => `<li><span class="num note">${timeOf(a.at)}</span><span class="who ${a.kind === "agent" ? "agent" : ""}">${esc(a.who)}</span><span class="what">${esc(a.what)}</span></li>`).join("")}</ul></div>`;
 }
@@ -1705,6 +1841,8 @@ function renderPolicyAdmin() {
     ["Borrower", "UK limited company or SPV; personal guarantees from principal directors", "Reasoned"],
     ["Experience", "Borrower or directors have relevant property investment experience", "Reasoned"],
     ["Adverse credit", "No unsatisfied CCJs or insolvency events; explained historic adverse considered", "Reasoned"],
+    ["Standard covenants (7.2)", `LTV no more than ${P.covLTV}%, ICR at least ${P.covICR}x, DSCR at least ${P.covDSCR}x if amortising. ${P.covTesting}. Set with headroom over the day-one limits so a small dip does not cause a breach`, "Calculated"],
+    ["Pricing grid (7.3)", `Margin over a ${pctTxt(P.pricing.referenceRate)} reference rate by LTV band (${P.pricing.bands.map((x) => "up to " + x[0] + "%: " + pctTxt(x[1])).join(", ")}), adjusted for risk grade, short WAULT, tenant concentration, EPC below C and approved exceptions; floor ${pctTxt(P.pricing.floorMargin)}. Arrangement fee ${pctTxt(P.pricing.feeSmall)} under £1m, ${pctTxt(P.pricing.feeLarge)} from £1m, minimum £5,000. Signed off by the RM, Underwriter and Head of Lending`, "Calculated"],
     ["Approval authority", "Underwriter approves every case up to £10m, including policy exceptions with a recorded reason; over £10m outside appetite. No Credit Committee", "Calculated"],
   ];
   return pageHead("Credit policies", "Credit policies", "The policy the agents test each case against. This prototype uses the illustrative UK market standard policy from the broker submission flow doc. In the product, the Client Admin uploads the lender's own policy and an agent extracts the rules with links to each clause.") +
@@ -2032,6 +2170,52 @@ document.addEventListener("click", async (e) => {
     if (!c.conditions || !c.conditions.length) runConditions(c);
   }
   else if (act === "cond-run") { runConditions(c); }
+  else if (act === "price-submit") {
+    const g = gridPricing(c);
+    const margin = parseFloat($("#prMargin").value), feePct = parseFloat($("#prFee").value), exitPct = parseFloat($("#prExit").value) || 0, reason = ($("#prReason").value || "").trim();
+    if (!isFinite(margin) || !isFinite(feePct)) { $("#prMsg").textContent = "Enter a margin and an arrangement fee."; return; }
+    if ((Math.abs(margin - g.margin) > 1e-9 || Math.abs(feePct - g.feePct) > 1e-9 || exitPct !== g.exitPct) && !reason) { $("#prMsg").textContent = "Give a reason for pricing away from the grid."; return; }
+    c.pricing = { margin, feePct, exitPct, reason, grid: g.margin, status: "awaiting", proposedBy: actor(), at: nowISO(), signoffs: { "Relationship Manager": { at: nowISO() } } };
+    c.terms = null;
+    (c.handoffs = c.handoffs || []).push({ at: nowISO(), who: actor(), what: `Proposed pricing: margin ${pctTxt(margin)}, rate ${pctTxt(priceFigures(c, c.pricing).rate)}, fee ${pctTxt(feePct)}`, note: reason });
+    audit(c, actor(), `Proposed pricing: margin ${pctTxt(margin)} (grid ${pctTxt(g.margin)}), arrangement fee ${pctTxt(feePct)}, exit fee ${pctTxt(exitPct)}${reason ? ". Reason: " + reason : ""}`);
+    save(); render(); toast("Pricing sent for sign-off");
+  }
+  else if (act === "price-sign") {
+    const p = c.pricing; if (!p || p.status !== "awaiting") return;
+    p.signoffs[actor()] = { at: nowISO() };
+    audit(c, actor(), `Approved the pricing (rate ${pctTxt(priceFigures(c, p).rate)}, fee ${pctTxt(p.feePct)})`);
+    if (SIGNERS.every((r) => p.signoffs[r])) { p.status = "agreed"; (c.handoffs = c.handoffs || []).push({ at: nowISO(), who: "System", what: "Pricing agreed by all three", note: "" }); audit(c, "System", "Pricing agreed by the RM, Underwriter and Head of Lending"); toast("Pricing agreed"); }
+    else toast("Pricing approved");
+    save(); render();
+  }
+  else if (act === "price-back") {
+    const why = ($("#prBack").value || "").trim(); if (!why) { $("#prMsg").textContent = "Add a comment saying why."; return; }
+    const p = c.pricing; p.status = "draft"; p.signoffs = {}; p.sentBack = { by: actor(), at: nowISO(), reason: why };
+    (c.handoffs = c.handoffs || []).push({ at: nowISO(), who: actor(), what: "Sent the pricing back to the RM", note: why });
+    audit(c, actor(), "Sent the pricing back to the RM: " + why); save(); render();
+  }
+  else if (act === "terms-make") { c.terms = { text: termsText(c), at: nowISO(), by: actor() }; audit(c, actor(), "Generated the terms letter"); save(); render(); }
+  else if (act === "terms-copy") { copyText(c.terms.text.replace(/\*\*/g, ""), "Terms letter copied"); }
+  else if (act === "terms-word") {
+    const blob = new Blob([wordDoc("Indicative terms " + c.ref, renderRich(c.terms.text))], { type: "application/msword" });
+    const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = `Indicative terms ${c.ref} ${String(c.title).replace(/[\\/:*?"<>|]/g, " ")}.doc`; document.body.append(a); a.click(); setTimeout(() => { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+  }
+  else if (act === "terms-print") {
+    const w = window.open("", "_blank");
+    if (!w) { toast("Allow pop-ups to print, or use Download as Word"); return; }
+    w.document.write(wordDoc("Indicative terms " + c.ref, renderRich(c.terms.text))); w.document.close(); w.focus(); setTimeout(() => w.print(), 300);
+  }
+  else if (act === "terms-email" || act === "terms-issue") {
+    if (act === "terms-email") {
+      try { await inboxCall("send", { threadId: c.source.threadId, body: c.terms.text.replace(/\*\*/g, "") }); } catch (err) { toast(err.message); return; }
+    }
+    c.terms.issued = { at: nowISO(), by: actor(), how: act === "terms-email" ? "email" : "marked" };
+    c.stage = "terms"; c.status = STAGES.terms;
+    (c.handoffs = c.handoffs || []).push({ at: nowISO(), who: actor(), what: act === "terms-email" ? "Emailed the terms letter to the broker" : "Issued the terms letter", note: "" });
+    audit(c, actor(), act === "terms-email" ? "Emailed the terms letter to the broker" : "Marked the terms letter as issued");
+    save(); render(); toast("Terms letter issued");
+  }
   else if (act === "cond-accept" || act === "cond-reject") {
     const x = (c.conditions || []).find((y) => y.id === t.dataset.id); if (!x) return;
     x.status = act === "cond-accept" ? "accepted" : "rejected";

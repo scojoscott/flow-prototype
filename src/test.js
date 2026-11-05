@@ -171,6 +171,28 @@ const conditions = { conditions: [
   await page.click('button[data-act="record"]');
   console.log("Status:", await page.locator(".casecard .chip.c-amber").first().innerText());
   await page.screenshot({ path: OUT + "/5c-decided.png", fullPage: true });
+  // pricing and terms
+  await page.click('.rolebox button[data-role="Relationship Manager"]');
+  await page.click('button[data-tab="pricing"]');
+  console.log("Grid margin:", await page.locator("#prMargin").inputValue());
+  await page.fill("#prMargin", "3.5");
+  await page.click('button[data-act="price-submit"]');
+  console.log("Reason msg:", await page.locator("#prMsg").innerText());
+  await page.fill("#prReason", "Matching a competing lender's terms");
+  await page.click('button[data-act="price-submit"]');
+  await page.click('.rolebox button[data-role="Head of Lending"]');
+  console.log("HoL action chip:", await page.locator(".casecard .chip.c-red").count());
+  await page.click('button[data-act="price-sign"]');
+  await page.click('.rolebox button[data-role="Underwriter"]');
+  await page.click('button[data-act="price-sign"]');
+  console.log("Pricing status:", await page.evaluate(() => cur().pricing.status));
+  await page.click('.rolebox button[data-role="Relationship Manager"]');
+  await page.click('button[data-act="terms-make"]');
+  const terms = await page.locator(".termsdoc").innerText();
+  console.log("Terms has rate:", /7\.5% a year/.test(terms), "has Unit 6 condition:", /Unit 6/.test(terms), "has rent deposit:", /Rent deposit/.test(terms));
+  await page.screenshot({ path: OUT + "/5e-terms.png", fullPage: true });
+  await page.click('button[data-act="terms-issue"]');
+  console.log("Final status:", await page.locator(".casecard .chip.c-amber").first().innerText());
   await page.click('button[data-tab="audit"]');
   console.log("Audit rows:", await page.locator(".audit li").count());
   // second case: policy exception and return to RM

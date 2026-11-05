@@ -328,6 +328,16 @@ const POLICY = {
   minLoan: 250000, maxLoan: 10000000, minTerm: 3, maxTermIO: 15, maxTermAmort: 25,
   maxLTV: 70, maxLTVSingle: 65, minICR: 1.5, stressRate: 6.5, minDSCR: 1.25,
   minWAULT: 3, concentration: 50, accountsMonths: 12, uwLimit: 1000000,
+  /* 7.2 Standard financial covenants: ongoing tests in the facility agreement, with headroom over the day-one limits */
+  /* 7.3 Pricing grid (illustrative): margin over the reference rate by LTV band, adjusted for risk grade and risk features */
+  pricing: {
+    referenceRate: 4.0, referenceName: "Reference rate (illustrative)", floorMargin: 2.5,
+    bands: [[50, 2.75], [60, 3.1], [65, 3.4], [70, 3.75]],
+    grade: [[3, -0.15], [6, 0], [8, 0.35], [10, 0.75]],
+    adj: { shortWAULT: 0.25, concentration: 0.2, epcBelowC: 0.1, exception: 0.5 },
+    feeSmall: 1.75, feeLarge: 1.5, feeThreshold: 1000000, feeMin: 5000, exitFee: 0, validityDays: 30,
+  },
+  covLTV: 75, covICR: 1.35, covDSCR: 1.15, covTesting: "LTV annually on a lender-instructed valuation; ICR and DSCR quarterly on a 12-month rolling basis",
 };
 const JUDGEMENT_AREAS = [
   { area: "Property type", clause: "7.1 Property type", rule: "Retail, office, industrial and mixed use. Specialist uses (for example petrol stations, hotels) by exception." },
@@ -602,13 +612,27 @@ function save() {
 }
 const cur = () => cases.find((c) => c.id === currentId);
 /* Roles (requirements v1.1): the RM prepares the case, the Underwriter decides every case up to £10m. No Credit Committee. */
-const ROLES = ["Relationship Manager", "Underwriter"];
+const ROLES = ["Relationship Manager", "Underwriter", "Head of Lending"]; // Head of Lending holds the Approve pricing permission
 let currentRole = load("nashflow.role", "Relationship Manager");
 if (!ROLES.includes(currentRole)) currentRole = "Relationship Manager";
 const actor = () => currentRole;
-const STAGES = { rm: "With RM", uw: "With Underwriter", returned: "Returned to RM", approved: "Approved", declined: "Declined" };
+const STAGES = { rm: "With RM", uw: "With Underwriter", returned: "Returned to RM", approved: "Approved, pricing", declined: "Declined", terms: "Terms issued" };
+const SIGNERS = ["Relationship Manager", "Underwriter", "Head of Lending"];
 function stageOf(c) { return c.stage || (c.decision ? (c.decision.choice === "Decline" ? "declined" : "approved") : "rm"); }
-function waitingOn(c) { const s = stageOf(c); return s === "uw" ? "Underwriter" : s === "rm" || s === "returned" ? "Relationship Manager" : null; }
+function waitingList(c) {
+  const s = stageOf(c);
+  if (s === "uw") return ["Underwriter"];
+  if (s === "rm" || s === "returned") return ["Relationship Manager"];
+  if (s === "approved") {
+    const p = c.pricing;
+    if (!p || p.status === "draft") return ["Relationship Manager"];
+    if (p.status === "awaiting") return SIGNERS.filter((r) => !(p.signoffs || {})[r]);
+    return ["Relationship Manager"]; // agreed: RM issues the terms letter
+  }
+  return [];
+}
+function waitingOn(c) { const w = waitingList(c); return w.length ? w.join(" and ") : null; }
+function myTurn(c) { return !!c.memo && waitingList(c).includes(currentRole); }
 function audit(c, who, what, kind = "human") { c.audit.push({ at: nowISO(), who, what, kind }); }
 
 async function newCaseFromFiles(files, title, extra) {
@@ -721,7 +745,7 @@ ${JUDGEMENT_AREAS.map((j) => `   - ${j.area}: ${j.rule}`).join("\n")}
    - financial_analysis: LTV, ICR at the pay rate and under stress, DSCR if amortising, debt yield and the sensitivities, with headroom against policy, and what the accounts show using the FINANCIAL SPREAD (income and profit trend, interest cover from the accounts, gearing, cash, guarantor net worth; mark its ratios as (calculated)). One or two paragraphs, then "- " lines for each red or amber flag with the reason.
    - exit: how the loan is repaid at maturity (refinance or sale), whether the asset should be refinanceable then given lease events before maturity and the LTV and ICR at maturity, and what could stop it.
    - risks: 5 to 8 "- Risk: ... Mitigant: ..." lines, most important first, specific to this deal.
-   - covenants: proposed financial covenants using the SENSITIVITIES (LTV and ICR levels with headroom), then information undertakings (annual accounts, quarterly rent roll, lender's right to revalue). Say the levels are proposed.
+   - covenants: the financial covenants from the credit policy, section 7.2 (LTV no more than ${COVENANTS.ltv}%, ICR at least ${COVENANTS.icr}x, DSCR at least ${COVENANTS.dscr}x if amortising; ${POLICY.covTesting}), with the headroom this deal has against each from the SENSITIVITIES, citing the policy as (policy 7.2); then information undertakings (annual accounts, quarterly rent roll, lender's right to revalue).
    - conditions: a "**Conditions precedent**" list and a "**Conditions subsequent**" list, specific to this deal (for example lender-instructed RICS valuation, report on title, redemption statement, KYC and AML on directors and PSCs, personal guarantees with independent legal advice, buildings insurance with the lender noted, a new lease for a tenant holding over).
 3. broker_request: if anything is Not present, Not confident, out of date or inconsistent, draft one short polite email to the broker (first name) listing each item needed as "- " lines, signed "[Your name]". Otherwise "".
 
@@ -887,7 +911,7 @@ function computeChecks(c) {
 }
 
 /* ------------------------------------------------------------------ sensitivities and covenant headroom (calculated) */
-const COVENANTS = { ltv: 75, icr: 1.35 }; // illustrative proposed covenant levels, not from a lender
+const COVENANTS = { ltv: POLICY.covLTV, icr: POLICY.covICR, dscr: POLICY.covDSCR }; // from the credit policy, section 7.2 (illustrative)
 function computeAnalysis(c) {
   const out = []; const add = (label, value, note) => out.push({ label, value, note });
   const L = num(c, "loan_amount"), V = num(c, "property_value"), R = num(c, "annual_rent"), rate = num(c, "interest_rate_pct"), T = num(c, "loan_term_years");
@@ -903,12 +927,12 @@ function computeAnalysis(c) {
     const withRent = c.tenants.filter((t) => t.annual_rent > 0);
     if (withRent.length > 1) { const top = withRent.slice().sort((a, b) => b.annual_rent - a.annual_rent)[0]; add("ICR if the largest tenant leaves", times((R - top.annual_rent) / interest), `Without ${top.name} (${money(top.annual_rent)}).`); }
     add("Break-even occupancy", pct((interest / R) * 100, 0), "Share of the passing rent needed to pay interest.");
-    add("Rent fall before ICR covenant breach", pct(Math.max(0, (1 - (COVENANTS.icr * interest) / R) * 100), 0), `Against a proposed ICR covenant of ${COVENANTS.icr}x.`);
+    add("Rent fall before ICR covenant breach", pct(Math.max(0, (1 - (COVENANTS.icr * interest) / R) * 100), 0), `Against the policy ICR covenant of ${COVENANTS.icr}x.`);
   }
   if (L != null && V != null) {
     add("LTV if value falls 10%", pct((L / (V * 0.9)) * 100), "");
     add("LTV if value falls 20%", pct((L / (V * 0.8)) * 100), "");
-    add("Value fall before LTV covenant breach", pct(Math.max(0, (1 - L / (COVENANTS.ltv / 100) / V) * 100), 0), `Against a proposed LTV covenant of ${COVENANTS.ltv}%.`);
+    add("Value fall before LTV covenant breach", pct(Math.max(0, (1 - L / (COVENANTS.ltv / 100) / V) * 100), 0), `Against the policy LTV covenant of ${COVENANTS.ltv}%.`);
   }
   if (T != null && c.tenants.length && R) {
     const end = new Date(); end.setFullYear(end.getFullYear() + T);
@@ -968,7 +992,7 @@ function systemSections(c) {
     external: "Companies House, Land Registry and credit bureau checks are not connected in this prototype. In the product, Companies House is checked live and Land Registry and bureau results are mocked for the MVP.",
     policy: `Assessed against the ${POLICY.name} (${POLICY.version}). Numeric limits are calculated, not judged by the AI.\n\n${pol}`,
     recommendation: rec,
-    sensitivity: "Calculated in code from the extracted figures. Proposed covenant levels (LTV " + COVENANTS.ltv + "%, ICR " + COVENANTS.icr + "x) are illustrative, not from a lender.\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate."),
+    sensitivity: "Calculated in code from the extracted figures. Covenant levels come from the credit policy, section 7.2 Standard financial covenants: LTV no more than " + COVENANTS.ltv + "%, ICR at least " + COVENANTS.icr + "x, DSCR at least " + COVENANTS.dscr + "x if amortising. " + POLICY.covTesting + ".\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate."),
   };
 }
 function refreshSystemSections(c) {
@@ -1018,7 +1042,7 @@ function conditionsPrompt(c) {
   const tenants = (c.tenants || []).map((t) => `- ${t.name}: ${money(t.annual_rent)}, lease end ${t.lease_end || "not clear"}${t.break_date ? ", break " + t.break_date : ""}${t.note ? " (" + t.note + ")" : ""}`).join("\n") || "- None listed";
   return `You are the conditions agent in NashFlow, a commercial property lending tool for a UK specialist lender. Propose the conditions for this loan for the Underwriter to accept or reject. The Underwriter decides; you suggest.
 
-Use the lender's base set below where it applies to this case, and add case-specific conditions for the risks in this case (for example a vacant unit, a tenant holding over, a short WAULT, a low EPC, a policy exception, a mismatch in the figures). Do not include base conditions that do not apply (for example a redemption statement on a purchase). Keep each condition to one sentence in plain UK English. For covenants, use the proposed levels: LTV ${COVENANTS.ltv}% maximum, ICR ${COVENANTS.icr}x minimum.
+Use the lender's base set below where it applies to this case, and add case-specific conditions for the risks in this case (for example a vacant unit, a tenant holding over, a short WAULT, a low EPC, a policy exception, a mismatch in the figures). Do not include base conditions that do not apply (for example a redemption statement on a purchase). Keep each condition to one sentence in plain UK English. For financial covenants, use the levels in the lender's credit policy, section 7.2: LTV ${COVENANTS.ltv}% maximum, ICR ${COVENANTS.icr}x minimum, DSCR ${COVENANTS.dscr}x minimum if amortising, tested as follows: ${POLICY.covTesting}.
 
 Base set:
 ${BASE_CONDITIONS.map(([t, x], i) => `B${i + 1}. [${t}] ${x}`).join("\n")}
@@ -1117,6 +1141,33 @@ function finBlock(c) {
   const rat = f.ratios.map((r) => `- ${r.label} (calculated): ${f.periods.map((p, i) => `${p.label} ${r.values[i]}`).join(", ")}`);
   const g = f.guarantors.map((x) => `- ${x.name}: assets ${money(x.assets)}, liabilities ${money(x.liabilities)}, net worth ${money(x.net_worth)}${x.liquid != null ? ", liquid " + money(x.liquid) : ""}${x.source ? ` [${x.source.doc} p${x.source.page || 1}]` : ""}`);
   return [`Entity: ${f.entity}. Basis: ${f.basis}.`, ...rows, ...rat, ...(g.length ? ["Guarantors:", ...g] : []), ...(f.flags.length ? ["Flags:", ...f.flags.map((x) => "- " + x.text)] : [])].join("\n");
+}
+
+/* ------------------------------------------------------------------ pricing (policy 7.3), calculated in code */
+function gridPricing(c) {
+  const P = POLICY.pricing; const L = num(c, "loan_amount"); const V = num(c, "property_value");
+  const ltv = L != null && V ? (L / V) * 100 : null;
+  const lines = [];
+  const band = ltv == null ? P.bands[P.bands.length - 1] : (P.bands.find((b) => ltv <= b[0] + 1e-9) || P.bands[P.bands.length - 1]);
+  lines.push({ label: ltv == null ? "LTV band (LTV not known, top band used)" : `LTV band up to ${band[0]}% (LTV ${ltv.toFixed(1)}%)`, add: band[1], base: true });
+  const g = c.decision && +c.decision.grade;
+  if (g) { const gb = P.grade.find((x) => g <= x[0]); if (gb && gb[1]) lines.push({ label: `Risk grade ${g}`, add: gb[1] }); }
+  const k = (id) => c.checks.find((x) => x.id === id);
+  const w = k("wault"); if (w && w.metric != null && w.metric < POLICY.minWAULT) lines.push({ label: `WAULT under ${POLICY.minWAULT} years`, add: P.adj.shortWAULT });
+  const cn = k("conc"); if (cn && cn.flag === "amber") lines.push({ label: "One tenant pays over half the rent", add: P.adj.concentration });
+  const e = k("epc"); if (e && "DE".includes(String(e.value))) lines.push({ label: `EPC ${e.value} (below C)`, add: P.adj.epcBelowC });
+  if (c.rec && c.rec.exceptions.length) lines.push({ label: "Approved as a policy exception", add: P.adj.exception });
+  const margin = Math.max(P.floorMargin, lines.reduce((s2, x) => s2 + x.add, 0));
+  const feePct = L != null && L >= P.feeThreshold ? P.feeLarge : P.feeSmall;
+  return { margin: +margin.toFixed(2), lines, feePct, exitPct: P.exitFee, ltv };
+}
+function priceFigures(c, p) {
+  const P = POLICY.pricing; const L = num(c, "loan_amount"); const R = num(c, "annual_rent");
+  const rate = P.referenceRate + p.margin;
+  const fee = L != null ? Math.max(P.feeMin, (L * p.feePct) / 100) : null;
+  const interest = L != null ? (L * rate) / 100 : null;
+  const icr = interest && R != null ? R / interest : null;
+  return { rate, fee, interest, icr, icrOk: icr == null ? null : icr >= POLICY.minICR };
 }
 
 /* ------------------------------------------------------------------ the agent run */
