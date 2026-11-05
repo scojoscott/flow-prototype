@@ -539,7 +539,7 @@ const stateClass = (s) => ({ "Found": "s-found", "Not present": "s-notpresent", 
 const PROVIDERS = {
   "claude-builtin": { name: "Claude (built in)", desc: "Uses your Claude account through this page. No key needed. Works inside the NashFlow link." },
   "gemini": { name: "Google Gemini", desc: "Free key from aistudio.google.com. Works in the downloaded copy. On the free tier Google may use what you send to improve its models." },
-  "claude-api": { name: "Claude API", desc: "Anthropic API key. Works in the downloaded copy." },
+  "claude-api": { name: "Claude API", desc: "Anthropic API key. Works on the hosted page and the downloaded copy." },
   "azure": { name: "Azure OpenAI", desc: "Your Azure OpenAI resource, for example NashTech's own. Works in the downloaded copy." },
 };
 const GEMINI_DEFAULT = "gemini-3.8-flash";
@@ -548,7 +548,9 @@ let settings = Object.assign({ provider: "auto", geminiKey: "", geminiModel: GEM
 /* Demo links can carry a Gemini key after the # (for example .../#gk=KEY). It is saved in this browser and removed from the address bar, so the key is never in the code or sent to the web server. */
 try {
   const hp = new URLSearchParams(location.hash.slice(1));
-  if (hp.get("gk")) { settings.geminiKey = hp.get("gk"); store("nashflow.settings", settings); history.replaceState(null, "", location.pathname + location.search); }
+  if (hp.get("gk")) settings.geminiKey = hp.get("gk");
+  if (hp.get("ck")) { settings.claudeKey = hp.get("ck"); settings.provider = "claude-api"; }
+  if (hp.get("gk") || hp.get("ck")) { store("nashflow.settings", settings); history.replaceState(null, "", location.pathname + location.search); }
 } catch (e) { /* no key in the link */ }
 if (/^gemini-(1|2)\./.test(settings.geminiModel || "")) { settings.geminiModel = GEMINI_DEFAULT; store("nashflow.settings", settings); }
 let sampleFn = null;
