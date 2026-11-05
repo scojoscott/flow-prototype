@@ -1564,7 +1564,7 @@ function toCheckCount(c) { return c.fields ? FIELDS.filter((f) => { const x = c.
 /* What the current role should do next on a case. Shown as a banner on the case and as the to-do list on the RM's home page. */
 function nextStep(c) {
   const st = stageOf(c), r = currentRole, p = c.pricing;
-  if (!c.memo) return c.run && c.run.error ? { text: "The agents stopped before the case was ready. Run them again to carry on.", tab: "memo", label: "See what happened", mine: r === "Relationship Manager" } : { text: "The agents are reading the deal pack. The case is ready in a minute or two." };
+  if (!c.memo) return c.run && c.run.error ? { text: "The agents stopped before the case was ready. Run them again to carry on.", tab: "agents", label: "See what happened", mine: r === "Relationship Manager" } : { text: "The agents are reading the deal pack. The case is ready in a minute or two." };
   if (r === "Relationship Manager") {
     if (st === "returned") return { text: "The Underwriter returned this case" + (c.returned ? ": " + c.returned.reason : ".") + " Get what they need, then submit it again.", tab: "decision", label: "Resubmit to the Underwriter", mine: true };
     if (st === "rm") { const n = toCheckCount(c); const m = c.consistency.length; return n || m ? { text: `Check ${[n ? n + " field" + (n > 1 ? "s" : "") + " the agents weren't sure about" : "", m ? m + " mismatch" + (m > 1 ? "es" : "") + " between documents" : ""].filter(Boolean).join(" and ")}, then submit to the Underwriter.`, tab: "source", label: "Check the fields", mine: true } : { text: "The agents' work is complete and consistent. Add your note and submit to the Underwriter.", tab: "decision", label: "Submit to the Underwriter", mine: true }; }
@@ -1605,12 +1605,15 @@ function tabsFor(c) {
     policy: ["policy", "Policy checks", flags ? `<span class="chip c-amber">${flags} flag${flags > 1 ? "s" : ""}</span>` : ""],
     decision: ["decision", currentRole === "Relationship Manager" && !c.decision ? "Submit" : currentRole === "Underwriter" ? "Decision form" : "Decision"],
     pricing: ["pricing", currentRole === "Commercial" ? "Pricing approval" : "Pricing and terms", c.pricing && c.pricing.status === "awaiting" ? `<span class="chip ${currentRole === "Commercial" ? "c-red" : "c-amber"}">${currentRole === "Commercial" ? "Your approval" : "With Commercial"}</span>` : c.terms && c.terms.issued ? `<span class="chip c-green">Issued</span>` : ""],
+    docs: ["docs", "Documents", `<span class="chip c-grey">${c.docs.length}</span>`],
+    comms: ["comms", "Communication", c.chase && c.chase.flagRM ? `<span class="chip c-red">Not replying</span>` : c.chase && c.chase.awaiting ? `<span class="chip c-amber">Waiting on broker</span>` : ""],
+    agents: ["agents", "Agents at work", c.run && c.run.running ? `<span class="chip c-amber">Working</span>` : c.run && c.run.error ? `<span class="chip c-red">Stopped</span>` : ""],
     audit: ["audit", "Audit"],
   };
   const approved = c.decision && c.decision.choice === "Approve";
-  const ids = currentRole === "Underwriter" ? ["review", "memo", "source", "fin", "policy", "decision"].concat(approved ? ["pricing"] : [], ["audit"])
-    : currentRole === "Commercial" ? ["pricing", "memo", "fin", "policy", "audit"]
-    : ["memo", "source", "fin", "policy", "decision", "pricing", "audit"];
+  const ids = currentRole === "Underwriter" ? ["review", "memo", "source", "fin", "policy", "docs", "comms", "agents", "decision"].concat(approved ? ["pricing"] : [], ["audit"])
+    : currentRole === "Commercial" ? ["pricing", "memo", "fin", "policy", "docs", "comms", "audit"]
+    : ["memo", "source", "fin", "policy", "docs", "comms", "agents", "decision", "pricing", "audit"];
   return ids.map((id) => T[id]);
 }
 function defaultTab(c) {
@@ -1648,8 +1651,8 @@ function renderCaseView(c) {
   const tabs = tabsFor(c);
   if (!tabs.some((x) => x[0] === currentTab)) currentTab = defaultTab(c);
   let body;
-  if (!ready && currentTab !== "audit") body = renderWorking(c);
-  else body = { review: renderReview, memo: renderMemoTab, source: renderSource, fin: renderFinancials, policy: renderPolicyTab, decision: renderDecision, pricing: renderPricing, audit: renderAudit }[currentTab](c);
+  if (!ready && !["audit", "agents", "docs", "comms"].includes(currentTab)) body = renderWorking(c);
+  else body = { review: renderReview, memo: renderMemoTab, source: renderSource, fin: renderFinancials, policy: renderPolicyTab, docs: renderDocsTab, comms: renderComms, agents: renderAgentsTab, decision: renderDecision, pricing: renderPricing, audit: renderAudit }[currentTab](c);
   return pageHead("Case management", "Case management") + `
   <div class="casecard">
     <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${myTurn(c) ? `<span class="chip c-red">Your action</span>` : ""}${c.source && c.source.kind === "email" ? `<span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? `<span class="chip c-red">Broker not replying</span>` : ""}</div>
@@ -1709,8 +1712,20 @@ function renderMemoTab(c) {
       const body = editingSection === k ? `<textarea class="ed" id="memoEdit" aria-label="${esc(name)}">${esc(s.text)}</textarea><div class="row"><button class="btn primary small" type="button" data-act="save-sec" data-key="${k}">Save</button><button class="btn small" type="button" data-act="cancel-sec">Cancel</button></div>` : `<div class="memo-body">${renderRich(s.text) || '<p class="note">Empty</p>'}</div>`;
       return `<section class="memo-sec"><header><h3>${esc(name)}</h3><span class="by">${by}</span><span class="grow"></span>${editingSection === k ? "" : `${cm.length ? `<span class="chip c-blue">${cm.length} comment${cm.length > 1 ? "s" : ""}</span>` : ""}<button class="btn small" type="button" data-act="comment" data-key="${k}">Comment</button><button class="btn small" type="button" data-act="edit-sec" data-key="${k}">Edit</button>`}</header>${body}${cmHtml}</section>`;
     }).join("")}</div>`;
+  return `<div class="stack">${recbar}${stale}${memo}</div>`;
+}
+function renderAgentsTab(c) {
+  return c.run ? `<div class="stack">${renderAgents(c)}</div>` : `<div class="card"><h2>Agents at work</h2><p class="hint">The agents have not run on this case yet.</p></div>`;
+}
+function renderDocsTab(c) {
+  return `<div class="stack">${renderDocs(c)}${c.fields ? `<div><button class="btn small" type="button" data-tab="source">Check the extracted fields against these documents</button></div>` : ""}</div>`;
+}
+function renderComms(c) {
   const req = c.source && c.source.kind === "email" ? chaseCard(c) : c.brokerRequest ? `<div class="card"><div class="cardhead"><h2>Request to the broker</h2><span class="chip c-amber">Drafted</span></div><p class="hint">Drafted by the memo agent. Edit it, then copy it into your email. Nothing is sent from here.</p><textarea class="ed" id="brokerReq" aria-label="Request to the broker">${esc(c.brokerRequest)}</textarea><div class="row"><button class="btn" type="button" data-act="copy-req">Copy email</button><button class="btn" type="button" data-act="log-req">Mark as sent</button></div></div>` : "";
-  return `<div class="grid2"><div class="stack">${recbar}${stale}${memo}</div><div class="stack">${renderAgents(c)}${req}${renderDocs(c)}</div></div>`;
+  const t = c.terms;
+  const terms = t && t.issued ? `<div class="card"><div class="cardhead"><h2>Terms letter</h2><span class="chip c-green">Issued</span></div><p class="hint">${t.issued.how === "email" ? "Emailed to the broker" : "Marked as issued"} by ${esc(t.issued.by)}, ${dateOf(t.issued.at)} ${timeOf(t.issued.at)}.</p><div><button class="btn small" type="button" data-tab="pricing">Open the terms letter</button></div></div>` : "";
+  const none = !req && !terms ? `<div class="card"><h2>Communication</h2><p class="hint">${c.memo ? "Nothing to send to the broker. The pack is complete." : "The agents are still reading the pack. Any request to the broker appears here."}</p></div>` : "";
+  return `<div class="stack">${req}${terms}${none}</div>`;
 }
 
 function highlight(text, quote) {
