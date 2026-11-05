@@ -310,6 +310,22 @@ function parseDate(v) {
   return isNaN(d) ? null : d;
 }
 function b64ToBytes(b64) { const bin = atob(b64); const u = new Uint8Array(bin.length); for (let i = 0; i < bin.length; i++) u[i] = bin.charCodeAt(i); return u; }
+/* Escape raw line breaks and tabs inside JSON strings, and drop trailing commas: the two slips models make most in long JSON. */
+function fixJSONStrings(s) {
+  let out = "", inStr = false, esc = false;
+  for (const ch of s) {
+    if (inStr) {
+      if (esc) { esc = false; out += ch; continue; }
+      if (ch === "\\") { esc = true; out += ch; continue; }
+      if (ch === '"') { inStr = false; out += ch; continue; }
+      if (ch === "\n") { out += "\\n"; continue; }
+      if (ch === "\r") continue;
+      if (ch === "\t") { out += "\\t"; continue; }
+      out += ch;
+    } else { if (ch === '"') inStr = true; out += ch; }
+  }
+  return out.replace(/,\s*([}\]])/g, "$1");
+}
 function parseJSONLoose(text) {
   if (text && typeof text === "object") return text;
   let t = String(text || "").trim();
@@ -317,7 +333,11 @@ function parseJSONLoose(text) {
   if (fence) t = fence[1].trim();
   try { return JSON.parse(t); } catch (e) {}
   const a = t.indexOf("{"), b = t.lastIndexOf("}");
-  if (a >= 0 && b > a) { try { return JSON.parse(t.slice(a, b + 1)); } catch (e) {} }
+  if (a >= 0 && b > a) {
+    const s = t.slice(a, b + 1);
+    try { return JSON.parse(s); } catch (e) {}
+    try { return JSON.parse(fixJSONStrings(s)); } catch (e) {}
+  }
   throw new Error("The AI reply could not be read as data. Try running the agents again.");
 }
 
@@ -520,14 +540,39 @@ async function askAI(prompt, images, purpose) {
   if (p === "claude-api") {
     if (!settings.claudeKey) throw new Error("Add your Claude API key in Settings first.");
     const content = images.map((im) => ({ type: "image", source: { type: "base64", media_type: im.mime, data: im.b64 } })).concat([{ type: "text", text: prompt }]);
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "content-type": "application/json", "x-api-key": settings.claudeKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
-      body: JSON.stringify({ model: settings.claudeModel, max_tokens: 16000, messages: [{ role: "user", content }] }),
-    }).catch(() => { throw new Error("Could not reach the Claude API. It works in the downloaded copy of this page, not inside the NashFlow link."); });
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok) throw new Error("Claude API said: " + ((data.error && data.error.message) || res.status));
-    return parseJSONLoose((data.content || []).map((x) => x.text || "").join(""));
+    // Streamed so a long memo has room (thinking and the reply share max_tokens) without the request timing out.
+    const once = async () => {
+      const res = await fetch("https://api.anthropic.com/v1/messages", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-api-key": settings.claudeKey, "anthropic-version": "2023-06-01", "anthropic-dangerous-direct-browser-access": "true" },
+        body: JSON.stringify({ model: settings.claudeModel, max_tokens: 64000, stream: true, output_config: { effort: "medium" }, messages: [{ role: "user", content }] }),
+      }).catch(() => { throw new Error("Could not reach the Claude API. It works in the downloaded copy of this page, not inside the NashFlow link."); });
+      if (!res.ok) { const data = await res.json().catch(() => ({})); throw new Error("Claude API said: " + ((data.error && data.error.message) || res.status)); }
+      const reader = res.body.getReader(); const dec = new TextDecoder();
+      let buf = "", text = "", stop = "";
+      for (;;) {
+        const { value, done } = await reader.read(); if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf("\n")) >= 0) {
+          const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+          if (!line.startsWith("data:")) continue;
+          let ev; try { ev = JSON.parse(line.slice(5)); } catch (e) { continue; }
+          if (ev.type === "content_block_delta" && ev.delta && ev.delta.type === "text_delta") text += ev.delta.text;
+          else if (ev.type === "message_delta" && ev.delta && ev.delta.stop_reason) stop = ev.delta.stop_reason;
+          else if (ev.type === "error") throw new Error("Claude API said: " + ((ev.error && ev.error.message) || "stream error"));
+        }
+      }
+      if (stop === "max_tokens") throw new Error("The AI reply was too long and was cut off. Try running the agents again.");
+      if (stop === "refusal") throw new Error("Claude declined to answer this request.");
+      return parseJSONLoose(text);
+    };
+    try { return await once(); }
+    catch (e) {
+      if (!/could not be read as data|cut off/.test(e.message || "")) throw e;
+      toast("The AI reply was not complete. Trying once more");
+      return await once();
+    }
   }
   if (p === "azure") {
     if (!settings.azureEndpoint || !settings.azureDeployment || !settings.azureKey) throw new Error("Add the Azure endpoint, deployment and key in Settings first.");
