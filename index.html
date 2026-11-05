@@ -929,6 +929,9 @@ ${JSON.stringify(sens, null, 1)}
 FINANCIAL SPREAD (from the financial analysis agent; ratios calculated in code)
 ${finBlock(c)}
 
+COMPANIES HOUSE (live lookup by the Companies House agent; use it in the borrower and external checks sections, and treat a dissolved company, insolvency history or overdue filings as material)
+${(typeof chText === "function" && chText(c)) || (c.ch && c.ch.error ? "Not checked: " + c.ch.error : "Not checked.")}
+
 CONSISTENCY FLAGS
 ${JSON.stringify(c.consistency.map((f) => f.text))}
 
@@ -1059,6 +1062,15 @@ function computeChecks(c) {
     add({ id: "conc", area: "Tenant concentration", clause: "7.1 Income quality", rule: `Flag where one tenant pays over ${P.concentration}% of rent`, value: pct(share, 0) + " largest", outcome: "Pass", flag: share > P.concentration ? "amber" : null, why: `${top.name} pays ${pct(share, 0)} of the rent.${share > P.concentration ? " Concentration risk." : ""}` });
     const R2 = num(c, "annual_rent");
     if (R2 != null && Math.abs(tot - R2) > R2 * 0.01 && !c.consistency.some((x) => x.key === "tenants_sum")) c.consistency.push({ key: "tenants_sum", text: `Tenant rents add up to ${money(tot)}, but the rent used is ${money(R2)}.` });
+  }
+
+  // Companies House (live lookup, when connected)
+  if (c.ch && c.ch.profile) {
+    const f = c.ch.findings || []; const p = c.ch.profile;
+    const dead = p.company_status && p.company_status !== "active";
+    const red = f.filter((x) => x.tone === "red"), amb = f.filter((x) => x.tone === "amber");
+    add({ id: "ch", area: "Companies House", clause: "7.1 Borrower", rule: "Active UK company, no insolvency history, filings up to date", value: p.company_status, outcome: red.length ? "Fail" : "Pass", flag: red.length ? "red" : amb.length ? "amber" : null, core: !!dead,
+      why: (red.length ? red : amb.length ? amb : f.slice(0, 2)).map((x) => x.text).join(" ") + (dead ? " A company that is not active is outside appetite." : "") });
   }
 
   // Accounts age (BS-06)
@@ -1394,6 +1406,7 @@ async function runAgents(c, onlyMemo = false) {
   const steps = [
     { id: "intake", agent: "Intake agent", text: `Read ${c.docs.length} document${c.docs.length === 1 ? "" : "s"}: ${c.docs.map((d) => d.name).join(", ")}`, state: "done", at: c.createdAt },
     { id: "extract", agent: "Extraction agent", text: "Classify documents and extract fields with sources", state: onlyMemo ? "done" : "todo" },
+    { id: "ch", agent: "Companies House agent", text: "Check the borrower live at Companies House", state: onlyMemo ? "done" : "todo" },
     { id: "policy", agent: "Policy agent", text: "Run calculated checks against the credit policy", state: onlyMemo ? "done" : "todo" },
     { id: "fin", agent: "Financial analysis agent", text: "Spread the accounts and guarantor statements", state: onlyMemo ? "done" : "todo" },
     { id: "memo", agent: "Memo agent", text: "Assess judgement areas and draft the credit memo", state: "todo" },
@@ -1414,6 +1427,12 @@ async function runAgents(c, onlyMemo = false) {
       audit(c, "Extraction agent", `Extracted ${found} of ${FIELDS.length} fields with sources; classified ${c.docs.length} documents`, "agent");
       const b = usable(c, "borrower_name"); const pa = usable(c, "property_address");
       c.title = b || pa || c.title;
+      set("ch", "active");
+      if (typeof chFetch === "function" && settings.chKey) {
+        await chFetch(c); stopCheck(c);
+        if (c.ch && c.ch.profile) { const n = c.ch.findings.filter((f) => f.tone !== "green").length; set("ch", "done", `${c.ch.profile.company_name} (${c.ch.num}), ${c.ch.profile.company_status}. ${n ? n + " point" + (n > 1 ? "s" : "") + " to check" : "No concerns"}.`); }
+        else set("ch", "error", "Not checked: " + ((c.ch && c.ch.error) || "unknown error") + " The case carries on without it.");
+      } else set("ch", "done", "Skipped: no Companies House key. Add one in Change AI provider.");
       set("policy", "active");
       computeChecks(c); computeAnalysis(c);
       c.judgements = [];
@@ -1848,7 +1867,7 @@ function creditQuestions(c) {
   c.consistency.forEach((x) => q.push({ key: "cons:" + x.key, text: `${FIELD[x.key] ? FIELD[x.key].label : "Rent"} differs between documents. Which figure is right, and why?`, why: x.text }));
   FIELDS.filter((f) => needsCheck(c, f.key) && c.fields[f.key].state === "Not present").forEach((f) => q.push({ key: "miss:" + f.key, text: `Where is the ${f.label.toLowerCase()}?`, why: "Not in the pack." }));
   c.checks.filter((k) => k.outcome === "Fail").forEach((k) => q.push({ key: "chk:" + k.id, text: `${k.area} is outside policy at ${k.value}. How do you get comfortable, or what would you change?`, why: k.why }));
-  c.checks.filter((k) => k.outcome === "Pass" && k.flag === "amber").forEach((k) => q.push({ key: "amb:" + k.id, text: `${k.area} is close to the limit at ${k.value}. What protects the lender?`, why: k.why }));
+  c.checks.filter((k) => k.outcome === "Pass" && k.flag === "amber").forEach((k) => q.push({ key: "amb:" + k.id, text: k.id === "ch" ? "Companies House shows points to check. Are you comfortable with them?" : `${k.area} is close to the limit at ${k.value}. What protects the lender?`, why: k.why }));
   c.judgements.filter((k) => k.outcome === "Unclear" || k.outcome === "Fail").forEach((k) => q.push({ key: "jud:" + k.id, text: `${k.area}: what's your view?`, why: k.explanation }));
   (c.financials ? c.financials.flags : []).forEach((x, i) => q.push({ key: "fin:" + i, text: `${x.text.replace(/\.$/, "")}. What's behind this?`, why: "From the financial analysis." }));
   return q.slice(0, 6);
@@ -2118,7 +2137,15 @@ async function chGet(path) {
 const normCo = (s) => String(s || "").toUpperCase().replace(/\bLIMITED\b/g, "LTD").replace(/[^A-Z0-9 ]/g, "").replace(/\s+/g, " ").trim();
 async function chLookup(c, manual) {
   if (chBusy[c.id] || !c.fields) return;
-  chBusy[c.id] = true; c.ch = Object.assign({}, c.ch || {}, { running: true, error: "" }); if (manual) render();
+  c.ch = Object.assign({}, c.ch || {}, { running: true, error: "" }); if (manual) render();
+  await chFetch(c);
+  computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c);
+  save(); render();
+}
+/* Used by the Companies House agent step in the run, and by Check again */
+async function chFetch(c) {
+  if (chBusy[c.id]) return;
+  chBusy[c.id] = true; c.ch = Object.assign({}, c.ch || {}, { running: true, error: "" });
   try {
     let num = String(usable(c, "company_number") || "").replace(/\s/g, "").toUpperCase();
     const name = usable(c, "borrower_name");
@@ -2139,9 +2166,9 @@ async function chLookup(c, manual) {
       psc: ((psc && psc.items) || []).filter((x) => !x.ceased_on).map((x) => ({ name: x.name, control: (x.natures_of_control || []).map((n) => n.replace(/-/g, " ")).join(", ") })),
       charges: ((chg && chg.items) || []).map((x) => ({ status: x.status, created: x.created_on, to: ((x.persons_entitled || [])[0] || {}).name || "", desc: (x.particulars && x.particulars.description) || "" })) };
     c.ch.findings = chFindings(c);
-    audit(c, "Companies House", `Checked ${prof.company_name} (${num}): ${prof.company_status}. ${c.ch.findings.filter((f) => f.tone !== "green").length} point${c.ch.findings.filter((f) => f.tone !== "green").length === 1 ? "" : "s"} to note.`, "agent");
-  } catch (e) { c.ch = { at: nowISO(), error: e.message || String(e) }; }
-  finally { chBusy[c.id] = false; if (typeof refreshSystemSections === "function") refreshSystemSections(c); save(); render(); }
+    audit(c, "Companies House agent", `Checked ${prof.company_name} (${num}): ${prof.company_status}. ${c.ch.findings.filter((f) => f.tone !== "green").length} point${c.ch.findings.filter((f) => f.tone !== "green").length === 1 ? "" : "s"} to note.`, "agent");
+  } catch (e) { c.ch = { at: nowISO(), error: e.message || String(e) }; audit(c, "Companies House agent", "Not checked: " + c.ch.error, "agent"); }
+  finally { chBusy[c.id] = false; save(); }
 }
 function chFindings(c) {
   const h = c.ch, p = h.profile, out = [];

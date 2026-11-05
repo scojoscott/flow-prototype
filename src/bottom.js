@@ -359,7 +359,7 @@ function creditQuestions(c) {
   c.consistency.forEach((x) => q.push({ key: "cons:" + x.key, text: `${FIELD[x.key] ? FIELD[x.key].label : "Rent"} differs between documents. Which figure is right, and why?`, why: x.text }));
   FIELDS.filter((f) => needsCheck(c, f.key) && c.fields[f.key].state === "Not present").forEach((f) => q.push({ key: "miss:" + f.key, text: `Where is the ${f.label.toLowerCase()}?`, why: "Not in the pack." }));
   c.checks.filter((k) => k.outcome === "Fail").forEach((k) => q.push({ key: "chk:" + k.id, text: `${k.area} is outside policy at ${k.value}. How do you get comfortable, or what would you change?`, why: k.why }));
-  c.checks.filter((k) => k.outcome === "Pass" && k.flag === "amber").forEach((k) => q.push({ key: "amb:" + k.id, text: `${k.area} is close to the limit at ${k.value}. What protects the lender?`, why: k.why }));
+  c.checks.filter((k) => k.outcome === "Pass" && k.flag === "amber").forEach((k) => q.push({ key: "amb:" + k.id, text: k.id === "ch" ? "Companies House shows points to check. Are you comfortable with them?" : `${k.area} is close to the limit at ${k.value}. What protects the lender?`, why: k.why }));
   c.judgements.filter((k) => k.outcome === "Unclear" || k.outcome === "Fail").forEach((k) => q.push({ key: "jud:" + k.id, text: `${k.area}: what's your view?`, why: k.explanation }));
   (c.financials ? c.financials.flags : []).forEach((x, i) => q.push({ key: "fin:" + i, text: `${x.text.replace(/\.$/, "")}. What's behind this?`, why: "From the financial analysis." }));
   return q.slice(0, 6);
@@ -629,7 +629,15 @@ async function chGet(path) {
 const normCo = (s) => String(s || "").toUpperCase().replace(/\bLIMITED\b/g, "LTD").replace(/[^A-Z0-9 ]/g, "").replace(/\s+/g, " ").trim();
 async function chLookup(c, manual) {
   if (chBusy[c.id] || !c.fields) return;
-  chBusy[c.id] = true; c.ch = Object.assign({}, c.ch || {}, { running: true, error: "" }); if (manual) render();
+  c.ch = Object.assign({}, c.ch || {}, { running: true, error: "" }); if (manual) render();
+  await chFetch(c);
+  computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c);
+  save(); render();
+}
+/* Used by the Companies House agent step in the run, and by Check again */
+async function chFetch(c) {
+  if (chBusy[c.id]) return;
+  chBusy[c.id] = true; c.ch = Object.assign({}, c.ch || {}, { running: true, error: "" });
   try {
     let num = String(usable(c, "company_number") || "").replace(/\s/g, "").toUpperCase();
     const name = usable(c, "borrower_name");
@@ -650,9 +658,9 @@ async function chLookup(c, manual) {
       psc: ((psc && psc.items) || []).filter((x) => !x.ceased_on).map((x) => ({ name: x.name, control: (x.natures_of_control || []).map((n) => n.replace(/-/g, " ")).join(", ") })),
       charges: ((chg && chg.items) || []).map((x) => ({ status: x.status, created: x.created_on, to: ((x.persons_entitled || [])[0] || {}).name || "", desc: (x.particulars && x.particulars.description) || "" })) };
     c.ch.findings = chFindings(c);
-    audit(c, "Companies House", `Checked ${prof.company_name} (${num}): ${prof.company_status}. ${c.ch.findings.filter((f) => f.tone !== "green").length} point${c.ch.findings.filter((f) => f.tone !== "green").length === 1 ? "" : "s"} to note.`, "agent");
-  } catch (e) { c.ch = { at: nowISO(), error: e.message || String(e) }; }
-  finally { chBusy[c.id] = false; if (typeof refreshSystemSections === "function") refreshSystemSections(c); save(); render(); }
+    audit(c, "Companies House agent", `Checked ${prof.company_name} (${num}): ${prof.company_status}. ${c.ch.findings.filter((f) => f.tone !== "green").length} point${c.ch.findings.filter((f) => f.tone !== "green").length === 1 ? "" : "s"} to note.`, "agent");
+  } catch (e) { c.ch = { at: nowISO(), error: e.message || String(e) }; audit(c, "Companies House agent", "Not checked: " + c.ch.error, "agent"); }
+  finally { chBusy[c.id] = false; save(); }
 }
 function chFindings(c) {
   const h = c.ch, p = h.profile, out = [];
