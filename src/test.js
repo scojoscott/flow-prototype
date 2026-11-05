@@ -144,6 +144,24 @@ const conditions = { conditions: [
   console.log("Memo ref panel:", await page.locator("#srcBody .qnote").count() ? await page.locator("#srcBody .qnote").innerText() : "no highlight");
   await page.screenshot({ path: OUT + "/3e-memo-ref.png" });
   await page.keyboard.press("Escape");
+  // Companies House (mocked)
+  await page.route("https://api.company-information.service.gov.uk/**", async (route) => {
+    const u = route.request().url(); const auth = route.request().headers()["authorization"] || "";
+    const j = (b) => route.fulfill({ status: 200, contentType: "application/json", headers: { "access-control-allow-origin": "*" }, body: JSON.stringify(b) });
+    if (!auth.startsWith("Basic ")) return route.fulfill({ status: 401, body: "" });
+    if (u.includes("/officers")) return j({ items: [{ name: "REDMOND, Joanne", officer_role: "director", appointed_on: "2017-03-01" }, { name: "REDMOND, Patrick", officer_role: "director", appointed_on: "2017-03-01" }, { name: "SHAW, Alan", officer_role: "director", appointed_on: "2024-01-10" }] });
+    if (u.includes("/persons-with-significant-control")) return j({ items: [{ name: "Mrs Joanne Redmond", natures_of_control: ["ownership-of-shares-50-to-75-percent"] }] });
+    if (u.includes("/charges")) return j({ items: [{ status: "outstanding", created_on: "2019-05-02", persons_entitled: [{ name: "Northern High Street Bank plc" }] }] });
+    if (u.includes("/search/companies")) return j({ items: [{ title: "REDMERE ESTATES LIMITED", company_number: "11456209" }] });
+    return j({ company_name: "REDMERE ESTATES LIMITED", company_number: "11456209", company_status: "active", date_of_creation: "2017-02-14", registered_office_address: { address_line_1: "88 Wilmslow Road", locality: "Manchester", postal_code: "M14 5TQ" }, has_insolvency_history: false, accounts: { overdue: false } });
+  });
+  await page.evaluate(() => { settings.chKey = "test-ch-key"; });
+  await page.click('button[data-tab="policy"]');
+  await page.waitForFunction(() => cur().ch && !cur().ch.running, null, { timeout: 10000 });
+  console.log("Companies House:", await page.evaluate(() => cur().ch.error || cur().ch.findings.map((f) => f.tone + ": " + f.text).join(" | ")));
+  console.log("Memo external:", await page.evaluate(() => cur().memo.external.text.slice(0, 90)));
+  await page.screenshot({ path: OUT + "/4b-companies-house.png", fullPage: true });
+  await page.click('button[data-tab="memo"]');
   // the RM's own view
   await page.click('button[data-act="submit-uw"]');
   console.log("Blocked without view, now on:", await page.evaluate(() => currentTab));

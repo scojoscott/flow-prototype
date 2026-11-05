@@ -264,6 +264,7 @@ function renderCaseView(c) {
   const recTone = c.rec && c.memo ? { approve: "green", decline: "red", more: "amber", escalate: "blue" }[c.rec.kind] : "";
   const tabs = tabsFor(c);
   if (!tabs.some((x) => x[0] === currentTab)) currentTab = defaultTab(c);
+  if (ready && c.memo && settings.chKey && !c.ch && !chBusy[c.id]) setTimeout(() => chLookup(c), 0);
   let body;
   if (!ready && !["audit", "agents", "docs", "comms"].includes(currentTab)) body = renderWorking(c);
   else body = { review: renderReview, memo: renderMemoTab, source: renderSource, fin: renderFinancials, policy: renderPolicyTab, rmview: renderRmView, docs: renderDocsTab, comms: renderComms, agents: renderAgentsTab, decision: renderDecision, pricing: renderPricing, audit: renderAudit }[currentTab](c);
@@ -612,6 +613,94 @@ function renderFinancials(c) {
     </div></div>
     <div class="stack" style="margin-top:16px">${renderStress(c)}</div>`;
 }
+/* ------------------------------------------------------------------ Companies House (live lookup from the browser) */
+const CH_API = "https://api.company-information.service.gov.uk";
+const chBusy = {};
+async function chGet(path) {
+  const key = settings.chKey; if (!key) throw new Error("No Companies House key. Add it in Change AI provider, or open a link with #chk= and the key.");
+  let res;
+  try { res = await fetch(CH_API + path, { headers: { Authorization: "Basic " + btoa(key + ":") } }); }
+  catch (e) { throw new Error("Could not reach Companies House from this page. The key may need https://scojoscott.github.io added under JavaScript domains."); }
+  if (res.status === 404) return null;
+  if (res.status === 401) throw new Error("Companies House rejected the key (401). Check the key, or add https://scojoscott.github.io under JavaScript domains.");
+  if (!res.ok) throw new Error("Companies House error " + res.status);
+  return res.json();
+}
+const normCo = (s) => String(s || "").toUpperCase().replace(/\bLIMITED\b/g, "LTD").replace(/[^A-Z0-9 ]/g, "").replace(/\s+/g, " ").trim();
+async function chLookup(c, manual) {
+  if (chBusy[c.id] || !c.fields) return;
+  chBusy[c.id] = true; c.ch = Object.assign({}, c.ch || {}, { running: true, error: "" }); if (manual) render();
+  try {
+    let num = String(usable(c, "company_number") || "").replace(/\s/g, "").toUpperCase();
+    const name = usable(c, "borrower_name");
+    if (!/^[A-Z0-9]{8}$/.test(num) && /^\d{6,7}$/.test(num)) num = num.padStart(8, "0");
+    let how = "company number from the pack";
+    if (!/^[A-Z0-9]{8}$/.test(num)) {
+      if (!name) throw new Error("No company number or borrower name to look up.");
+      const r = await chGet("/search/companies?items_per_page=5&q=" + encodeURIComponent(name));
+      const hit = (r && r.items || []).find((x) => normCo(x.title) === normCo(name)) || (r && r.items || [])[0];
+      if (!hit) throw new Error(`No company found for "${name}".`);
+      num = hit.company_number; how = "search on the borrower name";
+    }
+    const prof = await chGet("/company/" + num);
+    if (!prof) throw new Error(`Company ${num} not found at Companies House.`);
+    const [off, psc, chg] = await Promise.all([chGet(`/company/${num}/officers?items_per_page=50`).catch(() => null), chGet(`/company/${num}/persons-with-significant-control`).catch(() => null), chGet(`/company/${num}/charges`).catch(() => null)]);
+    c.ch = { at: nowISO(), how, num, profile: prof,
+      officers: ((off && off.items) || []).filter((o) => !o.resigned_on).map((o) => ({ name: o.name, role: o.officer_role, from: o.appointed_on })),
+      psc: ((psc && psc.items) || []).filter((x) => !x.ceased_on).map((x) => ({ name: x.name, control: (x.natures_of_control || []).map((n) => n.replace(/-/g, " ")).join(", ") })),
+      charges: ((chg && chg.items) || []).map((x) => ({ status: x.status, created: x.created_on, to: ((x.persons_entitled || [])[0] || {}).name || "", desc: (x.particulars && x.particulars.description) || "" })) };
+    c.ch.findings = chFindings(c);
+    audit(c, "Companies House", `Checked ${prof.company_name} (${num}): ${prof.company_status}. ${c.ch.findings.filter((f) => f.tone !== "green").length} point${c.ch.findings.filter((f) => f.tone !== "green").length === 1 ? "" : "s"} to note.`, "agent");
+  } catch (e) { c.ch = { at: nowISO(), error: e.message || String(e) }; }
+  finally { chBusy[c.id] = false; if (typeof refreshSystemSections === "function") refreshSystemSections(c); save(); render(); }
+}
+function chFindings(c) {
+  const h = c.ch, p = h.profile, out = [];
+  const add = (tone, text) => out.push({ tone, text });
+  const name = usable(c, "borrower_name");
+  if (name && normCo(name) !== normCo(p.company_name)) add("amber", `Name differs: the pack says "${name}", Companies House says "${p.company_name}".`);
+  else add("green", `Name matches: ${p.company_name}.`);
+  add(p.company_status === "active" ? "green" : "red", `Status: ${p.company_status}${p.company_status_detail ? " (" + p.company_status_detail.replace(/-/g, " ") + ")" : ""}.`);
+  if (p.date_of_creation) { const yrs = (Date.now() - new Date(p.date_of_creation)) / (365.25 * 864e5); add(yrs < 2 ? "amber" : "green", `Incorporated ${dateOf(p.date_of_creation)}${yrs < 2 ? ", less than 2 years ago" : ""}.`); }
+  if (p.has_insolvency_history) add("red", "Has insolvency history.");
+  if (p.accounts && p.accounts.overdue) add("red", "Accounts are overdue at Companies House.");
+  if (p.confirmation_statement && p.confirmation_statement.overdue) add("amber", "Confirmation statement is overdue.");
+  const outst = h.charges.filter((x) => x.status === "outstanding");
+  if (outst.length) add(/refinanc/i.test(String(usable(c, "purpose") || "")) ? "amber" : "red", `${outst.length} outstanding charge${outst.length > 1 ? "s" : ""}${outst[0].to ? ", including to " + outst[0].to : ""}. ${/refinanc/i.test(String(usable(c, "purpose") || "")) ? "Expected on a refinance: to be repaid and satisfied at completion." : "Check what it secures."}`);
+  else add("green", "No outstanding charges.");
+  const dirs = String(usable(c, "directors") || "").toUpperCase();
+  const ds = h.officers.filter((o) => o.role === "director");
+  const surname = (n) => String(n).split(",")[0].trim().toUpperCase();
+  const missing = ds.filter((o) => dirs && !dirs.includes(surname(o.name)));
+  if (dirs && missing.length) add("amber", `Director${missing.length > 1 ? "s" : ""} at Companies House not named in the pack: ${missing.map((o) => o.name).join("; ")}.`);
+  else if (ds.length) add("green", `${ds.length} current director${ds.length > 1 ? "s" : ""}, matching the pack.`);
+  return out;
+}
+function chText(c) {
+  const h = c.ch; if (!h || !h.profile) return "";
+  const p = h.profile; const a = p.registered_office_address || {};
+  return `Companies House (live, checked ${dateOf(h.at)}): ${p.company_name}, company ${h.num}, ${p.company_status}, incorporated ${p.date_of_creation ? dateOf(p.date_of_creation) : "-"}. Registered office: ${[a.address_line_1, a.address_line_2, a.locality, a.postal_code].filter(Boolean).join(", ")}.\n\n`
+    + h.findings.map((f) => `- ${f.tone === "green" ? "OK" : f.tone === "red" ? "Concern" : "Check"}: ${f.text}`).join("\n")
+    + (h.officers.length ? `\n\nCurrent officers: ${h.officers.map((o) => `${o.name} (${o.role.replace(/-/g, " ")})`).join("; ")}.` : "")
+    + (h.psc.length ? `\n\nPersons with significant control: ${h.psc.map((x) => x.name).join("; ")}.` : "")
+    + "\n\nLand Registry and credit bureau checks are not connected in this prototype.";
+}
+function chCard(c) {
+  const h = c.ch;
+  const btn = `<button class="btn small" type="button" data-act="ch-run">${h && h.profile ? "Check again" : "Check Companies House"}</button>`;
+  if (!settings.chKey) return `<div class="card"><div class="cardhead"><h2>Companies House</h2><span class="chip c-grey">Not connected</span></div><p class="hint">Add a Companies House key in Change AI provider to check the borrower live.</p></div>`;
+  if (!h || h.running) return `<div class="card"><div class="cardhead"><h2>Companies House</h2>${h && h.running ? `<span class="spin" aria-label="Checking"></span>` : ""}</div><p class="hint">${h && h.running ? "Checking the borrower at Companies House." : "Not checked yet."}</p>${h && h.running ? "" : `<div>${btn}</div>`}</div>`;
+  if (h.error) return `<div class="card"><div class="cardhead"><h2>Companies House</h2><span class="chip c-red">Not checked</span></div><div class="errbox">${esc(h.error)}</div><div>${btn}</div></div>`;
+  const p = h.profile; const a = p.registered_office_address || {};
+  const tone = h.findings.some((f) => f.tone === "red") ? "c-red" : h.findings.some((f) => f.tone === "amber") ? "c-amber" : "c-green";
+  return `<div class="card"><div class="cardhead"><h2>Companies House</h2><span class="chip ${tone}">${tone === "c-green" ? "No concerns" : tone === "c-red" ? "Concern" : "Points to check"}</span></div>
+    <p class="hint">Live check, ${dateOf(h.at)} ${timeOf(h.at)}, found by ${esc(h.how)}. <a href="https://find-and-update.company-information.service.gov.uk/company/${esc(h.num)}" target="_blank" rel="noopener">Open on Companies House</a></p>
+    <p><b>${esc(p.company_name)}</b> · ${esc(h.num)} · ${esc(p.company_status)} · incorporated ${p.date_of_creation ? dateOf(p.date_of_creation) : "-"}<br><span class="note">${esc([a.address_line_1, a.address_line_2, a.locality, a.postal_code].filter(Boolean).join(", "))}</span></p>
+    <ul class="ready">${h.findings.map((f) => `<li class="${f.tone === "green" ? "ok" : "todo"}">${esc(f.text)}</li>`).join("")}</ul>
+    ${h.officers.length ? `<div class="label">Current officers</div><p>${h.officers.map((o) => `${esc(o.name)} <span class="note">(${esc(o.role.replace(/-/g, " "))}${o.from ? ", since " + dateOf(o.from) : ""})</span>`).join("<br>")}</p>` : ""}
+    ${h.psc.length ? `<div class="label">Persons with significant control</div><p>${h.psc.map((x) => `${esc(x.name)} <span class="note">${esc(x.control)}</span>`).join("<br>")}</p>` : ""}
+    <div>${btn}</div></div>`;
+}
 function renderPolicyTab(c) {
   const flagCards = [];
   c.consistency.forEach((x) => flagCards.push({ tone: "amber", label: "Amber", title: "Mismatch: " + (FIELD[x.key] ? FIELD[x.key].label : "Rent"), text: x.text, refs: (x.cands || []).filter((k) => k.doc) }));
@@ -623,6 +712,7 @@ function renderPolicyTab(c) {
   const row = (k) => `<tr><td><b>${esc(k.area)}</b><span class="sub">${esc(k.clause)}</span></td><td>${esc(k.rule)}</td><td class="fv">${esc(k.type === "Reasoned" ? "" : k.value)}</td><td>${outcomeChip(k)}</td><td>${esc(k.type === "Reasoned" ? k.explanation : k.why)}${k.type === "Reasoned" && k.value ? `<span class="sub">Evidence: ${esc(k.value)}</span>` : ""}${k.source && k.source.doc ? " " + refChip(k.source.doc, k.source.page, "") : ""}</td></tr>`;
   return `<div class="stack">
     ${flagCards.length ? `<div class="flags">${flagCards.map((f) => `<div class="flag ${f.tone}"><div class="row"><span class="chip ${f.tone === "red" ? "c-red" : f.tone === "amber" ? "c-amber" : "c-green"}">${f.label}</span><b>${esc(f.title)}</b></div><p>${esc(f.text)}</p>${f.refs.length ? `<div class="row">${f.refs.map((r) => refChip(r.doc, r.page, r.quote)).join("")}</div>` : ""}</div>`).join("")}</div>` : ""}
+    ${chCard(c)}
     <div class="card"><h2>Calculated checks</h2><p class="hint">Worked out in code from the extracted figures, so the answer is exact and repeatable. The AI does not judge these. ${esc(POLICY.name)}, ${esc(POLICY.version)}.</p><div class="tablewrap"><table class="t"><thead><tr><th>Provision</th><th>Policy</th><th>Case</th><th>Outcome</th><th>Explanation</th></tr></thead><tbody>${c.checks.map(row).join("")}</tbody></table></div></div>
     ${(c.analysis || []).length ? `<div class="card"><h2>Sensitivities and covenant headroom</h2><p class="hint">Calculated in code. Covenants from the credit policy, section 7.2: LTV ${COVENANTS.ltv}%, ICR ${COVENANTS.icr}x.</p><div class="tablewrap"><table class="t"><thead><tr><th>Measure</th><th>Result</th><th>Comment</th></tr></thead><tbody>${c.analysis.map((a) => `<tr><td><b>${esc(a.label)}</b></td><td class="fv">${esc(a.value)}</td><td>${esc(a.note)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
     <div class="card"><h2>Judgement areas</h2><p class="hint">Assessed by the memo agent and explained, for a person to read and agree or not.</p>${c.judgements.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Provision</th><th>Policy</th><th></th><th>Outcome</th><th>Explanation</th></tr></thead><tbody>${c.judgements.map(row).join("")}</tbody></table></div>` : `<p class="hint">Not assessed yet.</p>`}</div>
@@ -1043,6 +1133,7 @@ function renderSettings() {
     opt("gemini", PROVIDERS.gemini.name, PROVIDERS.gemini.desc) +
     `<div class="cfg"><label for="gKey">Gemini API key</label><input id="gKey" type="password" autocomplete="off" value="${esc(settings.geminiKey)}" placeholder="Paste the key from aistudio.google.com"><label for="gModel">Gemini model</label><input id="gModel" type="text" value="${esc(settings.geminiModel)}"></div>` +
     opt("claude-api", PROVIDERS["claude-api"].name, PROVIDERS["claude-api"].desc) +
+    `<div class="cfg"><label for="chKeyIn">Companies House API key (used for every provider)</label><input id="chKeyIn" type="password" autocomplete="off" value="${esc(settings.chKey || "")}"></div>` +
     `<div class="cfg"><label for="cKey">Claude API key</label><input id="cKey" type="password" autocomplete="off" value="${esc(settings.claudeKey)}"><label for="cModel">Claude model</label><input id="cModel" type="text" value="${esc(settings.claudeModel)}"></div>` +
     opt("azure", PROVIDERS.azure.name, PROVIDERS.azure.desc) +
     `<div class="cfg"><label for="aEnd">Endpoint</label><input id="aEnd" type="text" value="${esc(settings.azureEndpoint)}" placeholder="https://your-resource.openai.azure.com"><label for="aDep">Deployment name</label><input id="aDep" type="text" value="${esc(settings.azureDeployment)}"><label for="aKey">Key</label><input id="aKey" type="password" autocomplete="off" value="${esc(settings.azureKey)}"></div>`;
@@ -1289,6 +1380,7 @@ document.addEventListener("click", async (e) => {
   if (t.id === "saveSettings") {
     settings.provider = (document.querySelector('input[name="prov"]:checked') || {}).value || "auto";
     settings.geminiKey = $("#gKey").value.trim(); settings.geminiModel = $("#gModel").value.trim() || GEMINI_DEFAULT;
+    if ($("#chKeyIn")) { const nk = $("#chKeyIn").value.trim(); if (nk !== (settings.chKey || "")) { settings.chKey = nk; cases.forEach((x) => { if (x.ch && x.ch.error) delete x.ch; }); } }
     settings.claudeKey = $("#cKey").value.trim(); settings.claudeModel = $("#cModel").value.trim() || "claude-sonnet-5-5";
     settings.azureEndpoint = $("#aEnd").value.trim(); settings.azureDeployment = $("#aDep").value.trim(); settings.azureKey = $("#aKey").value.trim();
     store("nashflow.settings", settings); renderProviderPill(); $("#settingsModal").hidden = true; render(); toast("AI provider saved"); return;
@@ -1355,6 +1447,7 @@ document.addEventListener("click", async (e) => {
     const k = t.dataset.key; c.comments = c.comments || {}; (c.comments[k] = c.comments[k] || []).push({ who: actor(), at: nowISO(), text: txt });
     audit(c, actor(), `Commented on "${MEMO_SECTIONS.find((x) => x[0] === k)[1]}": ${txt}`); commenting = null; save(); render();
   }
+  else if (act === "ch-run") { chLookup(c, true); }
   else if (act === "rmv-choice") { const v = rmView(c); v.choice[t.dataset.key] = v.choice[t.dataset.key] === t.dataset.choice ? "" : t.dataset.choice; save(); render(); }
   else if (act === "rmv-rec") { const v = rmView(c); v.rec = t.dataset.choice; audit(c, actor(), "Recorded the RM recommendation: " + v.rec); save(); render(); }
   else if (act === "wi-max") { const w = wiState(c); const r = wiResult(c); w.L = r.mx.v; save(); render(); }
