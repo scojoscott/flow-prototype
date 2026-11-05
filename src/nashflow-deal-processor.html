@@ -955,7 +955,7 @@ function computeChecks(c) {
   if (L == null) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: "-", outcome: "Unclear", why: missing("loan amount") });
   else if (L > P.maxLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Above the £10m cap, so outside appetite.` });
   else if (L < P.minLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Below the £250,000 minimum.` });
-  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: "Within the lending range. The Underwriter decides." });
+  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: "Within the lending range." });
 
   // Term
   const maxT = amort ? P.maxTermAmort : P.maxTermIO;
@@ -1085,10 +1085,10 @@ function computeRecommendation(c) {
   c.judgements.filter((k) => k.outcome === "Unclear").forEach((k) => reasons.push({ text: `To review: ${k.area}, ${k.explanation}`, ref: k.id }));
 
   let kind, label;
-  if (core.length) { kind = "decline"; label = "Decline (outside appetite)"; }
-  else if (missing.length || outOfDate.length || unclear.length) { kind = "more"; label = "Request more information"; }
-  else if (exceptions.length) { kind = "escalate"; label = "Policy exception (Underwriter to justify)"; }
-  else { kind = "approve"; label = "Approve (within appetite)"; }
+  if (core.length) { kind = "decline"; label = "Decline: outside appetite"; }
+  else if (missing.length || outOfDate.length || unclear.length) { kind = "more"; label = "More information needed"; }
+  else if (exceptions.length) { kind = "escalate"; label = "Approve with a policy exception"; }
+  else { kind = "approve"; label = "Approve"; }
   const L = num(c, "loan_amount");
   let approver;
   if (L != null && L > POLICY.maxLoan) approver = "Outside appetite: decline";
@@ -1107,7 +1107,7 @@ const MEMO_SECTIONS = [
 ];
 function systemSections(c) {
   const pol = c.checks.concat(c.judgements).map((k) => `- ${k.area} (${k.clause}): ${k.outcome}. ${k.type === "Calculated" ? k.why : k.explanation}${k.source && k.source.doc ? ` [${k.source.doc} p${k.source.page || 1}]` : ""}`).join("\n");
-  const rec = `Suggested: ${c.rec.label}. Required approver: ${c.rec.approver}.\n\nReasons, most important first:\n\n` + (c.rec.reasons.length ? c.rec.reasons.map((r) => "- " + r.text).join("\n") : "- All provisions pass and no material issues were found.") + `\n\nThis is the system's suggestion. The approver makes the decision and records the rationale.`;
+  const rec = `Recommendation: ${c.rec.label}.\n\nWhy, most important first:\n\n` + (c.rec.reasons.length ? c.rec.reasons.map((r) => "- " + r.text).join("\n") : "- All provisions pass and no material issues were found.");
   return {
     external: "Companies House, Land Registry and credit bureau checks are not connected in this prototype. In the product, Companies House is checked live and Land Registry and bureau results are mocked for the MVP.",
     policy: `Assessed against the ${POLICY.name} (${POLICY.version}). Numeric limits are calculated, not judged by the AI.\n\n${pol}`,
@@ -1428,7 +1428,7 @@ const recChipClass = (kind) => ({ approve: "c-green", decline: "c-red", more: "c
 function pageHead(title, crumb, intro) {
   return `<div class="pagehead"><h1>${esc(title)}</h1><div class="crumb">Demo › ${esc(crumb || title)}</div></div>${intro ? `<p class="intro">${intro}</p>` : ""}`;
 }
-const protoNote = `<div class="proto"><b>Prototype.</b> Use made-up or anonymised deal packs only. Documents are sent to the AI provider shown in the sidebar. The agents prepare the case; a person makes every credit decision.</div>`;
+const protoNote = `<div class="proto"><b>Prototype.</b> Use made-up or anonymised deal packs only. Documents are sent to the AI provider shown in the sidebar.</div>`;
 function missingCount(c) { return c.fields ? FIELDS.filter((f) => { const x = c.fields[f.key]; const need = f.mandatory || (f.mandatoryIf === "purchase" && x.state !== "Not applicable"); return need && !x.edited && x.state !== "Found" && x.state !== "Not applicable"; }).length : 0; }
 
 const ROLE_INFO = {
@@ -1449,7 +1449,7 @@ function renderNav() {
     $("#navCases").innerHTML = `<div class="navlabel">Pricing</div>${item("cases", "Pricing queue", mine || null)}${item("case", "Case management", null, !c)}`;
     $("#navAdmin").innerHTML = `<div class="navlabel">Reference</div>${item("grid", "Pricing grid")}${item("policy", "Credit policies")}`;
   } else {
-    $("#navCases").innerHTML = `<div class="navlabel">Cases</div>${item("new", "New case")}${item("cases", "My cases", mine || cases.length)}${item("case", "Case management", null, !c)}`;
+    $("#navCases").innerHTML = `<div class="navlabel">Cases</div>${item("cases", "My cases", mine || cases.length)}${item("new", "New case")}${item("case", "Case management", null, !c)}`;
     $("#navAdmin").innerHTML = `<div class="navlabel">Administration</div>${item("inbox", "Deals inbox")}${item("policy", "Credit policies")}${item("agents", "AI governance")}`;
   }
 }
@@ -1471,7 +1471,8 @@ function caseRow(c) {
   const miss = missingCount(c); const mism = c.consistency ? c.consistency.length : 0;
   const complete = !c.fields ? `<span class="chip c-grey">Reading</span>` : miss ? `<span class="chip c-amber">${miss} missing</span>` : `<span class="chip c-green">Complete</span>`;
   const consistent = !c.fields ? "" : mism ? `<span class="chip c-amber">${mism} mismatch</span>` : `<span class="chip c-green">Consistent</span>`;
-  const rec = c.rec && c.memo ? `<span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label.split(" (")[0])}</span>` : c.run && c.run.error ? `<span class="chip c-red">Run stopped</span>` : `<span class="chip c-grey">Pending</span>`;
+  const vv = verdict(c);
+  const rec = vv ? `<span class="chip ${recChipClass(vv.kind)}">${esc(vv.label)}</span>` : c.run && c.run.error ? `<span class="chip c-red">Run stopped</span>` : `<span class="chip c-grey">Pending</span>`;
   return `<tr><td class="num">${dateOf(c.createdAt)} ${timeOf(c.createdAt)}<span class="sub">uploaded</span></td>
     <td><b>${esc(c.title)}</b>${c.source && c.source.kind === "email" ? ` <span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? ` <span class="chip c-red">Broker not replying</span>` : ""}<span class="sub">${esc(c.ref)}${c.fields && usable(c, "broker") ? " · " + esc(usable(c, "broker")) : ""}</span></td>
     <td class="fv">${shortMoney(L)}</td><td>${complete}</td><td>${consistent}</td><td>${esc(STAGES[stageOf(c)])}${myTurn(c) ? ` <span class="chip c-red">Your action</span>` : c.memo && waitingOn(c) ? `<span class="sub">Waiting on ${esc(waitingOn(c))}</span>` : ""}</td><td>${rec}</td>
@@ -1495,7 +1496,7 @@ function renderQueueUW() {
   const withRM = cases.filter((c) => !c.decision && stageOf(c) !== "uw").length;
   const exc = waiting.filter((c) => c.rec.exceptions.length).length;
   const card = (c) => { const ltv = c.checks.find((k) => k.id === "ltv"), icr = c.checks.find((k) => k.id === "icr"); const fl = flagCount(c); const R = c.review;
-    return `<div class="qcard mine"><div class="top"><h3>${esc(c.title)}</h3><span class="chip c-grey">${esc(c.ref)}</span><span class="chip ${recChipClass(c.rec.kind)}">Suggests: ${esc(c.rec.label.split(" (")[0])}</span>${c.rec.exceptions.length && c.rec.kind !== "escalate" ? `<span class="chip c-blue">Policy exception</span>` : ""}</div>
+    return `<div class="qcard mine"><div class="top"><h3>${esc(c.title)}</h3><span class="chip c-grey">${esc(c.ref)}</span><span class="chip ${recChipClass(c.rec.kind)}">Recommended: ${esc(c.rec.label)}</span>${c.rec.exceptions.length && c.rec.kind !== "escalate" ? `<span class="chip c-blue">Policy exception</span>` : ""}</div>
       <div class="meta"><span>Loan <b>${shortMoney(num(c, "loan_amount"))}</b></span><span>LTV <b>${ltv ? esc(ltv.value) : "-"}</b></span><span>ICR <b>${icr ? esc(icr.value) : "-"}</b></span><span>Flags <b>${fl}</b></span><span>Submitted by <b>${esc(c.submitted.by)}</b>, waiting <b>${ago(c.submitted.at)}</b></span></div>
       ${c.submitted.note ? `<p class="why">"${esc(c.submitted.note.slice(0, 200))}${c.submitted.note.length > 200 ? "..." : ""}"</p>` : ""}
       <div class="row"><button class="btn primary small" type="button" data-case="${c.id}" data-opentab="review">${R && R.max ? "Continue the review" : "Start the review"}</button>${R && R.max ? `<span class="note">Step ${R.step + 1} of ${RV_STEPS.length}</span>` : `<span class="note">${fl ? fl + " flag" + (fl === 1 ? "" : "s") + " to answer" : "Nothing flagged"}</span>`}</div></div>`; };
@@ -1555,7 +1556,7 @@ function renderCasesRM() {
       <div class="stat"><b>${more}</b><span>Need more information</span><small>Request drafted for the broker</small></div>
       <div class="stat"><b>${exc}</b><span>Exceptions or declines</span><small>Outside policy or appetite</small></div>
     </div>` +
-    (cases.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Received</th><th>Borrower and broker</th><th>Loan</th><th>Complete</th><th>Consistent</th><th>Status</th><th>Recommendation</th><th></th></tr></thead><tbody>${cases.map(caseRow).join("")}</tbody></table></div>`
+    (cases.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Received</th><th>Borrower and broker</th><th>Loan</th><th>Complete</th><th>Consistent</th><th>Status</th><th>Outcome</th><th></th></tr></thead><tbody>${cases.map(caseRow).join("")}</tbody></table></div>`
       : `<div class="card"><h2>No cases yet</h2><p class="hint">Upload a deal pack or run one of the sample packs.</p><div><button class="btn primary" type="button" data-view="new">New case</button></div></div>`);
 }
 
@@ -1617,6 +1618,21 @@ function defaultTab(c) {
   if (currentRole === "Commercial") return "pricing";
   return "memo";
 }
+/* What to show for the outcome: the agents' recommendation until the Underwriter decides, then the decision. */
+function verdict(c) {
+  if (!c.rec || !c.memo) return null;
+  const d = c.decision;
+  if (d) return { decided: true, label: d.choice === "Approve" ? "Approved" : "Declined", kind: d.choice === "Approve" ? "approve" : "decline", sub: "by the Underwriter" + (d.grade ? ", risk grade " + d.grade : ""), differs: !!d.override };
+  if (stageOf(c) === "returned") return { decided: false, label: "Returned to RM", kind: "more", sub: "by the Underwriter, for more information" };
+  return { decided: false, label: c.rec.label, kind: c.rec.kind, sub: "from the policy checks" };
+}
+function recBar(c, max) {
+  const v = verdict(c); const d = c.decision;
+  if (d) return `<div class="recbar"><div class="line"><span>Decision</span><span class="chip ${recChipClass(v.kind)}">${esc(v.label)}</span><span class="note">${esc(v.sub)}, ${dateOf(d.at)}</span></div>${d.rationale ? `<p>${esc(d.rationale.length > 260 ? d.rationale.slice(0, 260) + "..." : d.rationale)}</p>` : ""}${v.differs ? `<p class="note">The agents recommended ${esc(c.rec.label)}. The Underwriter decided differently and gave the reason above.</p>` : ""}</div>`;
+  const r = c.rec; const extra = r.reasons.length - max;
+  return `<div class="recbar"><div class="line"><span>Recommendation</span><span class="chip ${recChipClass(v.kind)}">${esc(v.label)}</span>${v.kind === "more" && stageOf(c) === "returned" ? "" : ""}</div>
+    ${r.reasons.length ? `<div class="label">Why</div><ol>${r.reasons.slice(0, max).map((x) => `<li>${esc(x.text)}</li>`).join("")}</ol>${extra > 0 ? `<div><button class="btn small" type="button" data-tab="policy">See ${extra} more in Policy checks</button></div>` : ""}` : `<p class="note">Within policy on every check, with nothing flagged.</p>`}</div>`;
+}
 function tile(k, v, s, tone) { return `<div class="tile ${tone || ""}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s || "&nbsp;"}</div></div>`; }
 function renderCaseView(c) {
   const ready = !!c.fields;
@@ -1636,7 +1652,7 @@ function renderCaseView(c) {
   else body = { review: renderReview, memo: renderMemoTab, source: renderSource, fin: renderFinancials, policy: renderPolicyTab, decision: renderDecision, pricing: renderPricing, audit: renderAudit }[currentTab](c);
   return pageHead("Case management", "Case management") + `
   <div class="casecard">
-    <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${myTurn(c) ? `<span class="chip c-red">Your action</span>` : ""}${c.source && c.source.kind === "email" ? `<span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? `<span class="chip c-red">Broker not replying</span>` : ""}<span style="flex:1"></span><button class="btn small" type="button" data-act="delete-case">Delete case</button></div>
+    <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${myTurn(c) ? `<span class="chip c-red">Your action</span>` : ""}${c.source && c.source.kind === "email" ? `<span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? `<span class="chip c-red">Broker not replying</span>` : ""}</div>
     <div class="subline">${esc(sub)}</div>
     <div class="tiles">${caseTiles(c, { L, T, V, ltv, icr, rb, recTone, toCheck: ready ? toCheckCount(c) : 0, ready })}
     </div>
@@ -1650,11 +1666,12 @@ function caseTiles(c, o) {
   const fac = tile("Facility", shortMoney(L), T != null ? `${T} years${rb ? ", " + esc(rb) : ""}` : "");
   const ltvT = tile("LTV", ltv ? esc(ltv.value) : "-", V != null ? `on ${shortMoney(V)} ${/estimate/i.test(String(usable(c, "value_basis") || "")) ? "estimate" : "valuation"}` : "", ltv && ltv.outcome === "Fail" ? "red" : "");
   const icrT = tile("Interest cover", icr ? esc(icr.value) : "-", `policy minimum ${POLICY.minICR}x`, icr && icr.outcome === "Fail" ? "red" : "");
-  const recT = tile("Recommendation", c.rec && c.memo ? esc(c.rec.label.split(" (")[0]) : "-", c.rec && c.memo ? "Underwriter decides" : "", recTone);
+  const vd = verdict(c);
+  const recT = vd ? tile(vd.decided ? "Decision" : "Recommendation", esc(vd.label), esc(vd.sub), { approve: "green", decline: "red", more: "amber", escalate: "blue" }[vd.kind]) : tile("Recommendation", "-", "");
   const gradeT = tile("Risk grade", c.decision && c.decision.grade ? c.decision.grade + " of 10" : "Not set", "set by the Underwriter");
   if (currentRole === "Underwriter") {
     const fl = ready && c.memo ? reviewFlags(c).length : 0;
-    return fac + ltvT + icrT + recT + tile("Flags to answer", ready && c.memo ? String(fl) : "-", fl ? "in the guided review" : "nothing flagged", fl ? "amber" : "") + tile("Waiting", c.submitted && stageOf(c) === "uw" ? ago(c.submitted.at) : c.decision ? "Decided" : "-", c.submitted ? "submitted by " + esc(c.submitted.by) : "not submitted yet");
+    return fac + ltvT + icrT + recT + (c.decision ? tile("Flags", String(fl), "answered in the review") : tile("Flags to answer", ready && c.memo ? String(fl) : "-", fl ? "in the guided review" : "nothing flagged", fl ? "amber" : "")) + tile("Waiting", c.submitted && stageOf(c) === "uw" ? ago(c.submitted.at) : c.decision ? "Decided" : "-", c.submitted ? "submitted by " + esc(c.submitted.by) : "not submitted yet");
   }
   if (currentRole === "Commercial" && c.decision && c.decision.choice === "Approve") {
     const g = gridPricing(c); const p = c.pricing; const f = p ? priceFigures(c, p) : null;
@@ -1679,13 +1696,13 @@ function renderWorking(c) {
 function renderMemoTab(c) {
   const r = c.rec;
   if (!c.memo) return renderWorking(c);
-  const recbar = `<div class="recbar"><div class="line"><span>Recommendation (a suggestion; a person decides)</span><span class="chip ${recChipClass(r.kind)}">${esc(r.label)}</span><span class="note">Approver: ${esc(r.approver)}</span></div>
-    ${r.reasons.length ? `<ol>${r.reasons.slice(0, 6).map((x) => `<li>${esc(x.text)}</li>`).join("")}</ol>` : `<p class="note">All provisions pass and no material issues were found.</p>`}</div>`;
+  const recbar = recBar(c, 3);
   const stale = c.memoStale ? `<div class="stale"><span>Figures changed after the memo was drafted. The policy assessment and recommendation are updated; the written sections are not.</span><button class="btn small" type="button" data-act="redraft">Redraft agent sections</button></div>` : "";
   const memo = `<div class="card"><div class="cardhead"><h2>Credit memo</h2><div class="row"><span class="chip c-amber">Draft</span><button class="btn small" type="button" data-act="copy-memo">Copy memo</button></div></div>
     <div class="legend"><span><i style="background:var(--muted)"></i>Drafted by the memo agent until a person edits a section. Every edit is audited.</span><span><i style="background:var(--accent)"></i>Red tags open the source document and page.</span></div>
     ${MEMO_SECTIONS.map(([k, name]) => {
-      const s = c.memo[k] || { text: "", by: "Memo agent" };
+      let s = c.memo[k] || { text: "", by: "Memo agent" };
+      if (k === "recommendation" && c.decision && s.by === "System") s = { by: "System", text: `Decision: ${c.decision.choice === "Approve" ? "approved" : "declined"} by the Underwriter, ${dateOf(c.decision.at)}${c.decision.grade ? ", risk grade " + c.decision.grade : ""}.\n\n${c.decision.rationale || ""}${c.decision.exception ? "\n\nReason for the policy exception: " + c.decision.exception : ""}\n\nThe agents recommended: ${c.rec.label}.` };
       const by = s.by === "System" ? "From the calculated checks" : s.by === "Memo agent" ? "Memo agent" : `Edited by ${s.by === "You" ? "you" : s.by} at ${timeOf(s.at)}`;
       const cm = ((c.comments || {})[k] || []);
       const cmHtml = (cm.length ? `<div class="comments">${cm.map((x) => `<div class="cmt"><b>${esc(x.who)}</b><span class="note"> ${dateOf(x.at)} ${timeOf(x.at)}</span><p>${esc(x.text)}</p></div>`).join("")}</div>` : "") + (commenting === k ? `<div class="cmt-ed"><textarea class="ed" id="cmtEdit" aria-label="Comment on ${esc(name)}" placeholder="Your comment as ${esc(currentRole)}"></textarea><div class="row"><button class="btn primary small" type="button" data-act="save-cmt" data-key="${k}">Add comment</button><button class="btn small" type="button" data-act="cancel-cmt">Cancel</button></div></div>` : "");
@@ -1915,7 +1932,7 @@ function renderReview(c) {
       <ul class="ready"><li class="${n ? "todo" : "ok"}">${n ? `${n} field${n > 1 ? "s" : ""} not checked by the RM` : "Every field checked by the RM"}</li><li class="${m ? "todo" : "ok"}">${m ? `${m} mismatch${m > 1 ? "es" : ""} between documents` : "No mismatches between documents"}</li><li class="${c.rec.exceptions.length ? "todo" : "ok"}">${c.rec.exceptions.length ? "Policy exception: " + esc(c.rec.exceptions.join(", ")) : "No policy exception"}</li></ul>
       <div class="ask"><h3>Is the case ready for you to review?</h3><p class="hint">If something big is missing, send it straight back. Otherwise NashFlow takes you through ${fl.length ? fl.length + " flag" + (fl.length > 1 ? "s" : "") : "the numbers"} next.</p>
         <div class="opts"><button class="btn primary" type="button" data-act="rv-next">Yes, start the review</button><button class="btn" type="button" data-act="rv-return">No, return it to the RM</button></div></div></div>`;
-    side = `<div class="recbar"><div class="line"><span>The agents suggest</span><span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label)}</span></div>${c.rec.reasons.length ? `<ol>${c.rec.reasons.slice(0, 5).map((x) => `<li>${esc(x.text)}</li>`).join("")}</ol>` : `<p class="note">All provisions pass.</p>`}<p class="note">A suggestion only. You decide.</p></div>`;
+    side = `<div class="recbar"><div class="line"><span>The agents recommend</span><span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label)}</span></div>${c.rec.reasons.length ? `<ol>${c.rec.reasons.slice(0, 5).map((x) => `<li>${esc(x.text)}</li>`).join("")}</ol>` : `<p class="note">All provisions pass.</p>`}</div>`;
   } else if (R.step === 1) {
     if (!fl.length) main = `<div class="card"><h2>Step 2 of 6: flags</h2><p class="hint">Nothing flagged. The agents found no mismatches, failed checks or concerns in the accounts.</p>${nav("Next: the numbers")}</div>`;
     else {
@@ -1956,7 +1973,7 @@ function renderReview(c) {
     main = `<div class="card"><h2>Step 5 of 6: risk grade</h2>
       <div class="ask"><h3>What risk grade do you give this case?</h3><p class="hint">1 is the strongest and 10 the weakest. The grade also feeds the pricing grid.</p>
         <div class="grades">${[1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map((n) => `<button class="opt ${n >= g.lo && n <= g.hi ? "guide" : ""}" type="button" data-act="rv-grade" data-grade="${n}" aria-pressed="${String(R.grade) === String(n)}">${n}</button>`).join("")}</div>
-        <p class="note">Dashed: where the figures usually put a case like this (${esc(g.why)}). A guide only. You decide.</p></div>
+        <p class="note">Dashed: where the figures usually put a case like this (${esc(g.why)}).</p></div>
       ${nav("Next: your decision")}</div>`;
     side = `<div class="card"><h2>Grade scale</h2><ul class="ready"><li class="ok">1 to 3: strong, well within policy</li><li class="ok">4 to 6: acceptable, normal risks</li><li class="todo">7 to 8: weaker, needs strong mitigants</li><li class="todo">9 to 10: high risk</li></ul></div>`;
   } else {
@@ -2032,7 +2049,7 @@ function renderDecision(c) {
   const side = `<div class="stack">${flowCard(c)}<div class="card"><h2>Approval authority</h2>
       <div class="signoff"><div><b>Underwriter</b><span>Every case up to £10m, including policy exceptions with a recorded reason</span></div><span class="chip c-green">Decides this case</span></div>
       <p class="hint">Loan ${money(L)}${c.rec.exceptions.length ? "; policy exception: " + esc(c.rec.exceptions.join(", ")) : "; no policy exception"}. Over £10m is outside appetite.</p></div></div>`;
-  const recbar = `<div class="recbar"><div class="line"><span>Recommendation (a suggestion; a person decides)</span><span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label)}</span></div>${c.rec.reasons.length ? `<ol>${c.rec.reasons.slice(0, 4).map((x) => `<li>${esc(x.text)}</li>`).join("")}</ol>` : ""}</div>`;
+  const recbar = recBar(c, 3);
   const sub = c.submitted ? `<div class="card"><h2>Note from the Relationship Manager</h2><p class="hint">Submitted by ${esc(c.submitted.by)}, ${dateOf(c.submitted.at)} ${timeOf(c.submitted.at)}.</p><div class="memo-body">${c.submitted.note ? renderRich(c.submitted.note) : '<p class="note">No note.</p>'}</div></div>` : "";
   const ret = st === "returned" && c.returned ? `<div class="errbox"><b>Returned by the Underwriter, ${dateOf(c.returned.at)} ${timeOf(c.returned.at)}.</b> ${esc(c.returned.reason)}</div>` : "";
   const switchTo = (r, why) => `<div class="card"><h2>${esc(why)}</h2><p class="hint">In the product each person sees only their own work. In this prototype, switch role to carry on.</p><div><button class="btn primary" type="button" data-role="${esc(r)}">Switch to ${esc(r)}</button></div></div>`;
@@ -2071,7 +2088,7 @@ function renderDecision(c) {
         <div class="row"><button class="btn primary" type="button" data-act="record">${dd.choice === "Return to the RM" ? "Return to the RM" : "Record decision"}</button><span class="note" id="decMsg"></span></div></div>`;
     }
   }
-  return `<div class="grid2"><div class="stack">${recbar}${main}</div>${side}</div>`;
+  return `<div class="grid2"><div class="stack">${c.decision ? "" : recbar}${main}</div>${side}</div>`;
 }
 const pctTxt = (x, d = 2) => (x == null || !isFinite(x) ? "-" : Number(x).toFixed(d).replace(/\.?0+$/, "") + "%");
 function termsText(c) {
