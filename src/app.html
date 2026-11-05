@@ -153,7 +153,7 @@ main { padding-block: 20px 60px; padding-left: 24px; padding-right: max(16px, en
 .rec .small { font-size: 12.5px; color: var(--muted); margin: 0; }
 
 .run { display: grid; gap: 8px; }
-.runstep { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 10px; align-items: start; }
+.runstep { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 10px; align-items: start; }
 .runstep .ic { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--line); display: grid; place-items: center; font-size: 11px; font-weight: 800; }
 .runstep.done .ic { background: var(--pass); border-color: var(--pass); color: #fff; }
 .runstep.active .ic { border-color: var(--accent); border-top-color: transparent; animation: spin 1s linear infinite; }
@@ -1336,6 +1336,58 @@ async function runAgents(c, onlyMemo = false) {
   if (typeof afterRun === "function") { try { await afterRun(c); } catch (e) { /* inbox follow-up is best effort */ } }
 }
 
+/* Rerun one agent on its own. Calculated policy checks are refreshed after any agent; the memo is marked out of date rather than redrafted. */
+async function rerunAgent(c, id) {
+  if (!c.run || c.run.running) return;
+  if (id === "memo") return runAgents(c, true);
+  const imgs = memImages[c.id] || [];
+  const step = c.run.steps.find((x) => x.id === id); if (!step) return;
+  c.run.running = true; c.run.error = null; c.run.cancel = null;
+  const set = (state, extra) => { step.state = state; step.at = nowISO(); if (extra) step.detail = extra; render(); };
+  const policyStep = c.run.steps.find((x) => x.id === "policy");
+  const repolicy = () => {
+    computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c);
+    if (policyStep) policyStep.detail = `${c.checks.filter((k) => k.outcome === "Pass").length} pass, ${c.checks.filter((k) => k.outcome === "Fail").length} fail, ${c.checks.filter((k) => k.outcome === "Unclear").length} unclear`;
+  };
+  try {
+    set("active");
+    if (id === "extract") {
+      const r = await askAI(extractPrompt(c, imgs), imgs, "extract");
+      stopCheck(c);
+      normaliseExtraction(c, r);
+      const found = FIELDS.filter((f) => c.fields[f.key].state === "Found").length;
+      set("done", `${found} of ${FIELDS.length} fields found, ${c.tenants.length} tenant${c.tenants.length === 1 ? "" : "s"}, ${c.consistency.length} consistency flag${c.consistency.length === 1 ? "" : "s"}`);
+      audit(c, "Extraction agent", `Rerun on its own: extracted ${found} of ${FIELDS.length} fields`, "agent");
+      repolicy();
+    } else if (id === "ch") {
+      if (!(typeof chFetch === "function" && settings.chKey)) set("done", "Skipped: no Companies House key. Add one in Change AI provider.");
+      else {
+        await chFetch(c); stopCheck(c);
+        if (c.ch && c.ch.profile) { const n = c.ch.findings.filter((f) => f.tone !== "green").length; set("done", `${c.ch.profile.company_name} (${c.ch.num}), ${c.ch.profile.company_status}. ${n ? n + " point" + (n > 1 ? "s" : "") + " to check" : "No concerns"}.`); }
+        else set("error", "Not checked: " + ((c.ch && c.ch.error) || "unknown error"));
+        audit(c, "Companies House agent", "Rerun on its own", "agent");
+      }
+      repolicy();
+    } else if (id === "policy") {
+      repolicy(); set("done", policyStep.detail);
+      audit(c, "Policy agent", `Rerun on its own: ${c.checks.length} calculated checks`, "agent");
+    } else if (id === "fin") {
+      const fr = await askAI(finPrompt(c), [], "financials");
+      stopCheck(c);
+      computeFinancials(c, fr);
+      set("done", `${c.financials.periods.length} year${c.financials.periods.length === 1 ? "" : "s"} spread, ${c.financials.guarantors.length} guarantor statement${c.financials.guarantors.length === 1 ? "" : "s"}, ${c.financials.flags.length} flag${c.financials.flags.length === 1 ? "" : "s"}`);
+      audit(c, "Financial analysis agent", "Rerun on its own", "agent");
+      repolicy();
+    }
+    if (c.memo && id !== "policy") c.memoStale = true;
+  } catch (e) {
+    step.state = "error"; step.detail = "Rerun stopped: " + (e.message || e);
+    audit(c, "System", `${step.agent} rerun stopped: ` + (e.message || e), "agent");
+  }
+  c.run.running = false;
+  save(); render();
+}
+
 /* ------------------------------------------------------------------ human actions */
 function editField(c, key, newVal) {
   const f = c.fields[key]; const old = f.value;
@@ -1434,7 +1486,7 @@ function renderCase(c) {
 }
 function renderRun(c) {
   if (!c.run) return "";
-  return `<div class="card"><h2>Agent run</h2><div class="run">${c.run.steps.map((s) => `<div class="runstep ${s.state}"><span class="ic">${s.state === "done" ? "✓" : s.state === "error" ? "!" : ""}</span><div><b>${esc(s.agent)}</b><span>${esc(s.detail || s.text)}</span></div></div>`).join("")}</div>
+  return `<div class="card"><h2>Agent run</h2><div class="run">${c.run.steps.map((s) => `<div class="runstep ${s.state}"><span class="ic">${s.state === "done" ? "✓" : s.state === "error" ? "!" : ""}</span><div><b>${esc(s.agent)}</b><span>${esc(s.detail || s.text)}</span></div>${!c.run.running && s.id !== "intake" && (s.state === "done" || s.state === "error") ? `<button class="btn small rerun1" type="button" data-act="rerun-one" data-step="${s.id}" title="Run only this agent again">Rerun</button>` : ""}</div>`).join("")}</div>
     ${c.run.error ? `<div class="errbox"><b>The run stopped.</b> ${esc(c.run.error)}</div><div class="row"><button class="btn primary" type="button" data-act="rerun">Run the agents again</button><button class="btn" type="button" data-act="settings">Settings</button></div>` : ""}
     ${!c.run.running && !c.run.error ? `<div class="row"><button class="btn small" type="button" data-act="rerun">Run all agents again</button></div>` : ""}</div>`;
 }
@@ -1594,6 +1646,7 @@ document.addEventListener("click", async (e) => {
   const c = cur(); if (!c) return;
   const act = t.dataset.act;
   if (act === "rerun") { runAgents(c); }
+  else if (act === "rerun-one") { rerunAgent(c, t.dataset.step); }
   else if (act === "redraft") { runAgents(c, true); }
   else if (act === "delete-case") {
     if (t.dataset.confirm !== "1") { t.dataset.confirm = "1"; t.textContent = "Click again to delete"; return; }

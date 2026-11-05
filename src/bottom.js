@@ -302,7 +302,8 @@ function caseTiles(c, o) {
 function renderAgents(c) {
   if (!c.run) return "";
   return `<div class="card"><div class="cardhead"><h2>Agents at work</h2>${c.run.running ? `<span class="chip c-amber">Working</span>` : c.run.error ? `<span class="chip c-red">Stopped</span>` : `<span class="chip c-green">Case ready</span>`}</div>
-    <div class="timeline">${c.run.steps.map((s) => `<div class="tl"><span class="time">${s.at ? timeOf(s.at) : ""}</span><div><b>${esc(s.agent)}</b>${s.state === "done" ? `<span class="chip c-green">Done</span>` : s.state === "active" ? `<span class="spin" aria-label="Working"></span>` : s.state === "error" ? `<span class="chip c-red">Stopped</span>` : `<span class="chip c-grey">Waiting</span>`}<p>${esc(s.detail || s.text)}</p></div></div>`).join("")}</div>
+    <div class="timeline">${c.run.steps.map((s) => `<div class="tl"><span class="time">${s.at ? timeOf(s.at) : ""}</span><div><b>${esc(s.agent)}</b>${s.state === "done" ? `<span class="chip c-green">Done</span>` : s.state === "active" ? `<span class="spin" aria-label="Working"></span>` : s.state === "error" ? `<span class="chip c-red">Stopped</span>` : `<span class="chip c-grey">Waiting</span>`}<p>${esc(s.detail || s.text)}</p>${!c.run.running && s.id !== "intake" && (s.state === "done" || s.state === "error") ? `<button class="btn small" type="button" data-act="rerun-one" data-step="${s.id}" title="Run only this agent again">Rerun ${s.id === "memo" ? "the memo agent" : "this agent"}</button>` : ""}</div></div>`).join("")}</div>
+    ${c.memoStale && !c.run.running ? `<p class="hint">The memo was drafted before the latest rerun. Rerun the memo agent to update its written sections.</p>` : ""}
     ${c.run.error ? `<div class="errbox"><b>The run stopped.</b> ${esc(c.run.error)}</div><div class="row"><button class="btn primary" type="button" data-act="rerun">Run the agents again</button><button class="btn" type="button" data-act="settings">Change AI provider</button></div>` : ""}
     ${c.run.running ? `<div><button class="btn small" type="button" data-act="stop-run">Stop the agents</button></div>` : ""}
     ${!c.run.running && !c.run.error ? `<div><button class="btn small" type="button" data-act="rerun">Run all agents again</button></div>` : ""}</div>`;
@@ -1416,6 +1417,7 @@ document.addEventListener("click", async (e) => {
   const c = cur(); if (!c) return;
   const act = t.dataset.act;
   if (act === "rerun") { runAgents(c); }
+  else if (act === "rerun-one") { rerunAgent(c, t.dataset.step); }
   else if (act === "redraft") { runAgents(c, true); }
   else if (act === "stop-run") { if (c.run && c.run.running) { c.run.cancel = "Stopped by " + actor() + "."; t.disabled = true; t.textContent = "Stopping after the current step"; audit(c, actor(), "Stopped the agents"); } }
   else if (act === "delete-case") {

@@ -161,6 +161,19 @@ const conditions = { conditions: [
   console.log("Companies House:", await page.evaluate(() => cur().ch.error || cur().ch.findings.map((f) => f.tone + ": " + f.text).join(" | ")));
   console.log("Memo external:", await page.evaluate(() => cur().memo.external.text.slice(0, 90)));
   await page.screenshot({ path: OUT + "/4b-companies-house.png", fullPage: true });
+  // rerun a single agent from Agents at work
+  await page.click('button[data-tab="agents"]');
+  const memoAt = await page.evaluate(() => cur().memo.summary && cur().memo.summary.at);
+  const aiCalls0 = await page.evaluate(() => (window.__aiCalls || 0));
+  await page.click('button[data-act="rerun-one"][data-step="ch"]');
+  await page.waitForFunction(() => !cur().run.running, null, { timeout: 10000 });
+  await page.click('button[data-act="rerun-one"][data-step="policy"]');
+  await page.waitForFunction(() => !cur().run.running, null, { timeout: 10000 });
+  const rr = await page.evaluate(() => ({ steps: cur().run.steps.map((s) => s.id + ":" + s.state).join(","), stale: !!cur().memoStale, memoSame: (cur().memo.summary && cur().memo.summary.at), buttons: document.querySelectorAll('[data-act="rerun-one"]').length }));
+  console.log("Rerun one agent:", JSON.stringify(rr), "memo kept:", rr.memoSame === memoAt);
+  if (rr.memoSame !== memoAt || !rr.stale || rr.buttons !== 5 || /error|active/.test(rr.steps)) throw new Error("single-agent rerun failed");
+  await page.screenshot({ path: OUT + "/4c-rerun-one.png", fullPage: true });
+  await page.evaluate(() => { cur().memoStale = false; });
   await page.click('button[data-tab="memo"]');
   // the RM's own view
   await page.click('button[data-act="submit-uw"]');
