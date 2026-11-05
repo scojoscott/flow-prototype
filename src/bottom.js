@@ -178,7 +178,9 @@ function nextStep(c) {
   if (!c.memo) return c.run && c.run.error ? { text: "The agents stopped before the case was ready. Run them again to carry on.", tab: "agents", label: "See what happened", mine: r === "Relationship Manager" } : { text: "The agents are reading the deal pack. The case is ready in a minute or two." };
   if (r === "Relationship Manager") {
     if (st === "returned") return { text: "The Underwriter returned this case" + (c.returned ? ": " + c.returned.reason : ".") + " Get what they need, then send it to credit again.", tab: "memo", label: "Send to credit again", mine: true };
-    if (st === "rm") { const n = toCheckCount(c); const m = c.consistency.length; return n || m ? { text: `Check ${[n ? n + " key field" + (n > 1 ? "s" : "") : "", m ? m + " mismatch" + (m > 1 ? "es" : "") + " between documents" : ""].filter(Boolean).join(" and ")}, then send it to credit.`, tab: "source", label: "Check the fields", mine: true } : { text: "The agents' work is complete and consistent. Review the credit memo, add your note and send it to credit.", tab: "memo", label: "Go to the credit memo", mine: true }; }
+    if (st === "rm") { const n = toCheckCount(c); const m = c.consistency.length; const mv = rmViewMissing(c);
+      if (!n && !m && mv.length) return { text: "The key fields are confirmed. Now add what only you know: the sponsor, the deal story and answers to the questions credit will ask.", tab: "rmview", label: "Add your view", mine: true };
+      return n || m ? { text: `Check ${[n ? n + " key field" + (n > 1 ? "s" : "") : "", m ? m + " mismatch" + (m > 1 ? "es" : "") + " between documents" : ""].filter(Boolean).join(" and ")}, then send it to credit.`, tab: "source", label: "Check the fields", mine: true } : { text: "The agents' work is complete and consistent. Review the credit memo, add your note and send it to credit.", tab: "memo", label: "Go to the credit memo", mine: true }; }
     if (st === "uw") return { text: "With the Underwriter. Nothing for you to do unless they return it." };
     if (st === "approved") {
       if (!p || p.status === "draft") return { text: p && p.sentBack ? "Commercial sent the pricing back: " + p.sentBack.reason : "Approved by the Underwriter. Propose pricing for Commercial to approve.", tab: "pricing", label: "Propose pricing", mine: true };
@@ -216,6 +218,7 @@ function tabsFor(c) {
     policy: ["policy", "Policy checks", flags ? `<span class="chip c-amber">${flags} flag${flags > 1 ? "s" : ""}</span>` : ""],
     decision: ["decision", currentRole === "Relationship Manager" && !c.decision ? "Submit" : currentRole === "Underwriter" ? "Decision form" : "Decision"],
     pricing: ["pricing", currentRole === "Commercial" ? "Pricing approval" : "Pricing and terms", c.pricing && c.pricing.status === "awaiting" ? `<span class="chip ${currentRole === "Commercial" ? "c-red" : "c-amber"}">${currentRole === "Commercial" ? "Your approval" : "With Commercial"}</span>` : c.terms && c.terms.issued ? `<span class="chip c-green">Issued</span>` : ""],
+    rmview: ["rmview", "Your view", currentRole === "Relationship Manager" && ["rm", "returned"].includes(stageOf(c)) && c.memo && rmViewMissing(c).length ? `<span class="chip c-red">To do</span>` : c.memo && !rmViewMissing(c).length ? `<span class="chip c-green">Done</span>` : ""],
     docs: ["docs", "Documents", `<span class="chip c-grey">${c.docs.length}</span>`],
     comms: ["comms", "Communication", c.chase && c.chase.flagRM ? `<span class="chip c-red">Not replying</span>` : c.chase && c.chase.awaiting ? `<span class="chip c-amber">Waiting on broker</span>` : ""],
     agents: ["agents", "Agents at work", c.run && c.run.running ? `<span class="chip c-amber">Working</span>` : c.run && c.run.error ? `<span class="chip c-red">Stopped</span>` : ""],
@@ -224,7 +227,7 @@ function tabsFor(c) {
   const approved = c.decision && c.decision.choice === "Approve";
   const ids = currentRole === "Underwriter" ? ["review", "decision", "memo", "source", "fin", "policy", "docs", "comms", "agents"].concat(approved ? ["pricing"] : [], ["audit"])
     : currentRole === "Commercial" ? ["pricing", "memo", "fin", "policy", "docs", "comms", "audit"]
-    : ["memo", "source", "fin", "policy", "docs", "comms", "agents", "pricing", "audit"];
+    : ["memo", "rmview", "source", "fin", "policy", "docs", "comms", "agents", "pricing", "audit"];
   return ids.map((id) => T[id]);
 }
 function defaultTab(c) {
@@ -263,7 +266,7 @@ function renderCaseView(c) {
   if (!tabs.some((x) => x[0] === currentTab)) currentTab = defaultTab(c);
   let body;
   if (!ready && !["audit", "agents", "docs", "comms"].includes(currentTab)) body = renderWorking(c);
-  else body = { review: renderReview, memo: renderMemoTab, source: renderSource, fin: renderFinancials, policy: renderPolicyTab, docs: renderDocsTab, comms: renderComms, agents: renderAgentsTab, decision: renderDecision, pricing: renderPricing, audit: renderAudit }[currentTab](c);
+  else body = { review: renderReview, memo: renderMemoTab, source: renderSource, fin: renderFinancials, policy: renderPolicyTab, rmview: renderRmView, docs: renderDocsTab, comms: renderComms, agents: renderAgentsTab, decision: renderDecision, pricing: renderPricing, audit: renderAudit }[currentTab](c);
   return pageHead("Case management", "Case management") + `
   <div class="casecard">
     <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${myTurn(c) ? `<span class="chip c-red">Your action</span>` : ""}${c.source && c.source.kind === "email" ? `<span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? `<span class="chip c-red">Broker not replying</span>` : ""}</div>
@@ -318,12 +321,13 @@ function renderMemoTab(c) {
     <div class="legend"><span><i style="background:var(--muted)"></i>Drafted by the memo agent until a person edits a section. Every edit is audited.</span><span><i style="background:var(--accent)"></i>Red tags open the source document and page.</span></div>
     ${MEMO_SECTIONS.map(([k, name]) => {
       let s = c.memo[k] || { text: "", by: "Memo agent" };
+      const rmSec = k === "recommendation" ? rmAssessmentSec(c) : "";
       if (k === "recommendation" && c.decision && s.by === "System") s = { by: "System", text: `Decision: ${c.decision.choice === "Approve" ? "approved" : "declined"} by the Underwriter, ${dateOf(c.decision.at)}${c.decision.grade ? ", risk grade " + c.decision.grade : ""}.\n\n${c.decision.rationale || ""}${c.decision.exception ? "\n\nReason for the policy exception: " + c.decision.exception : ""}\n\nThe agents recommended: ${c.rec.label}.` };
       const by = s.by === "System" ? "From the calculated checks" : s.by === "Memo agent" ? "Memo agent" : `Edited by ${s.by === "You" ? "you" : s.by} at ${timeOf(s.at)}`;
       const cm = ((c.comments || {})[k] || []);
       const cmHtml = (cm.length ? `<div class="comments">${cm.map((x) => `<div class="cmt"><b>${esc(x.who)}</b><span class="note"> ${dateOf(x.at)} ${timeOf(x.at)}</span><p>${esc(x.text)}</p></div>`).join("")}</div>` : "") + (commenting === k ? `<div class="cmt-ed"><textarea class="ed" id="cmtEdit" aria-label="Comment on ${esc(name)}" placeholder="Your comment as ${esc(currentRole)}"></textarea><div class="row"><button class="btn primary small" type="button" data-act="save-cmt" data-key="${k}">Add comment</button><button class="btn small" type="button" data-act="cancel-cmt">Cancel</button></div></div>` : "");
       const body = editingSection === k ? `<textarea class="ed" id="memoEdit" aria-label="${esc(name)}">${esc(s.text)}</textarea><div class="row"><button class="btn primary small" type="button" data-act="save-sec" data-key="${k}">Save</button><button class="btn small" type="button" data-act="cancel-sec">Cancel</button></div>` : `<div class="memo-body">${renderRich(s.text) || '<p class="note">Empty</p>'}</div>`;
-      return `<section class="memo-sec"><header><h3>${esc(name)}</h3><span class="by">${by}</span><span class="grow"></span>${editingSection === k ? "" : `${cm.length ? `<span class="chip c-blue">${cm.length} comment${cm.length > 1 ? "s" : ""}</span>` : ""}<button class="btn small" type="button" data-act="comment" data-key="${k}">Comment</button><button class="btn small" type="button" data-act="edit-sec" data-key="${k}">Edit</button>`}</header>${body}${cmHtml}</section>`;
+      return rmSec + `<section class="memo-sec"><header><h3>${esc(name)}</h3><span class="by">${by}</span><span class="grow"></span>${editingSection === k ? "" : `${cm.length ? `<span class="chip c-blue">${cm.length} comment${cm.length > 1 ? "s" : ""}</span>` : ""}<button class="btn small" type="button" data-act="comment" data-key="${k}">Comment</button><button class="btn small" type="button" data-act="edit-sec" data-key="${k}">Edit</button>`}</header>${body}${cmHtml}</section>`;
     }).join("")}</div>`;
   return `<div class="stack">${recbar}${stale}${memo}${currentRole === "Relationship Manager" ? sendToCredit(c) : ""}</div>`;
 }
@@ -336,9 +340,122 @@ function sendToCredit(c) {
   const toCheck = toCheckCount(c); const mism = c.consistency.length; const reqSent = (c.audit || []).some((a) => /request to the broker as sent/i.test(a.what)) || (c.chase && c.chase.sent && c.chase.sent.length);
   const item = (ok, text) => `<li class="${ok ? "ok" : "todo"}">${ok ? "Done" : "Open"}: ${esc(text)}</li>`;
   return `<div class="card sendcredit">${ret}<h2>Send to credit</h2><p class="hint">When you're happy with the memo and its recommendation, send the case to the Underwriter for a decision.</p>
-    <ul class="ready">${item(!toCheck, toCheck ? `${toCheck} key field${toCheck > 1 ? "s" : ""} to confirm in Source check` : "Key fields confirmed")}${item(!mism, mism ? `${mism} mismatch${mism > 1 ? "es" : ""} between documents` : "No mismatches")}${c.rec.kind === "more" ? item(reqSent, reqSent ? "Request sent to the broker" : "Request to the broker not sent yet (see Communication)") : ""}</ul>
+    <ul class="ready">${(() => { const mv = rmViewMissing(c); return `<li class="${mv.length ? "todo" : "ok"}">${mv.length ? "Open: your view (" + esc(mv.join(", ")) + ") <button class=\"btn small\" type=\"button\" data-tab=\"rmview\">Add your view</button>" : "Done: your view is in the memo"}</li>`; })()}${item(!toCheck, toCheck ? `${toCheck} key field${toCheck > 1 ? "s" : ""} to confirm in Source check` : "Key fields confirmed")}${item(!mism, mism ? `${mism} mismatch${mism > 1 ? "es" : ""} between documents` : "No mismatches")}${c.rec.kind === "more" ? item(reqSent, reqSent ? "Request sent to the broker" : "Request to the broker not sent yet (see Communication)") : ""}</ul>
     <div class="field"><label for="rmNote">Note to the Underwriter</label><textarea class="ed" id="rmNote" placeholder="What the Underwriter should know: your view, open points, anything you've checked with the broker"></textarea></div>
     <div class="row"><button class="btn primary" type="button" data-act="submit-uw">Send to credit</button><span class="note">Open items are shown to the Underwriter. The conditions agent runs when you send it.</span></div></div>`;
+}
+/* ------------------------------------------------------------------ the RM's own view: the judgement the agents can't supply */
+const RMV_QS = [
+  { k: "sponsor", label: "The sponsor", ask: "What do you know about the sponsor that isn't in the pack? Track record, how they've behaved on past deals, references.", choices: ["Met them", "Spoken by phone", "Not yet"], req: true },
+  { k: "site", label: "Site visit", ask: "What did you see? Condition of the building, the location, how the tenants' businesses look.", choices: ["Visited", "Booked", "Not needed", "Not yet"], req: false },
+  { k: "story", label: "The deal story and exit", ask: "Why this deal, why now, and is the exit believable?", req: true },
+  { k: "broker", label: "From the broker", ask: "Anything from calls or meetings that isn't written down.", req: false },
+  { k: "commercial", label: "Relationship and competition", ask: "The wider relationship, other lenders in the frame, and how keen we should be to win it.", req: false },
+];
+function creditQuestions(c) {
+  if (!c.fields) return [];
+  const q = [];
+  c.consistency.forEach((x) => q.push({ key: "cons:" + x.key, text: `${FIELD[x.key] ? FIELD[x.key].label : "Rent"} differs between documents. Which figure is right, and why?`, why: x.text }));
+  FIELDS.filter((f) => needsCheck(c, f.key) && c.fields[f.key].state === "Not present").forEach((f) => q.push({ key: "miss:" + f.key, text: `Where is the ${f.label.toLowerCase()}?`, why: "Not in the pack." }));
+  c.checks.filter((k) => k.outcome === "Fail").forEach((k) => q.push({ key: "chk:" + k.id, text: `${k.area} is outside policy at ${k.value}. How do you get comfortable, or what would you change?`, why: k.why }));
+  c.checks.filter((k) => k.outcome === "Pass" && k.flag === "amber").forEach((k) => q.push({ key: "amb:" + k.id, text: `${k.area} is close to the limit at ${k.value}. What protects the lender?`, why: k.why }));
+  c.judgements.filter((k) => k.outcome === "Unclear" || k.outcome === "Fail").forEach((k) => q.push({ key: "jud:" + k.id, text: `${k.area}: what's your view?`, why: k.explanation }));
+  (c.financials ? c.financials.flags : []).forEach((x, i) => q.push({ key: "fin:" + i, text: `${x.text.replace(/\.$/, "")}. What's behind this?`, why: "From the financial analysis." }));
+  return q.slice(0, 6);
+}
+function rmView(c) { return (c.rmView = c.rmView || { a: {}, choice: {}, qa: {}, rec: "", recWhy: "", structure: null }); }
+function rmViewMissing(c) {
+  const v = rmView(c); const miss = [];
+  RMV_QS.filter((x) => x.req).forEach((x) => { if (!(v.a[x.k] || "").trim()) miss.push(x.label); });
+  const cq = creditQuestions(c).filter((x) => !(v.qa[x.key] || "").trim()); if (cq.length) miss.push(`${cq.length} question${cq.length > 1 ? "s" : ""} credit will ask`);
+  if (!v.rec) miss.push("Your recommendation");
+  return miss;
+}
+function rmViewStarted(c) { const v = c.rmView; return !!(v && (v.rec || Object.values(v.a).some((x) => (x || "").trim()))); }
+function rmViewText(c) {
+  const v = c.rmView; if (!rmViewStarted(c)) return "";
+  const parts = [];
+  if (v.rec) parts.push(`**RM recommendation: ${v.rec}.**${v.recWhy ? " " + v.recWhy : ""}`);
+  RMV_QS.forEach((x) => { const t = (v.a[x.k] || "").trim(); const ch = v.choice[x.k]; if (t || ch) parts.push(`**${x.label}${ch ? " (" + ch.toLowerCase() + ")" : ""}:** ${t || "-"}`); });
+  const qa = creditQuestions(c).filter((x) => (v.qa[x.key] || "").trim());
+  if (qa.length) parts.push("Questions credit will ask:\n\n" + qa.map((x) => `- **${x.text}** ${v.qa[x.key].trim()}`).join("\n"));
+  if (v.structure) parts.push(`**Proposed structure:** ${money(v.structure.L)} over ${v.structure.T} years at ${v.structure.rate}%, ${v.structure.amort ? "amortising" : "interest only"}. LTV ${pct(v.structure.ltv)}, ICR ${times(v.structure.icr)}${v.structure.dscr != null ? ", DSCR " + times(v.structure.dscr) : ""}.${v.structure.why ? " " + v.structure.why : ""}`);
+  return parts.join("\n\n");
+}
+function wiState(c) {
+  const b = baseInputs(c); const v = rmView(c);
+  return (v.wi = v.wi || { L: b.L, T: b.T, rate: b.rate != null ? b.rate : POLICY.stressRate, amort: b.amort });
+}
+function wiResult(c) {
+  const w = wiState(c); const b = baseInputs(c);
+  const o = { L: +w.L || null, T: +w.T || null, rate: +w.rate || null, amort: !!w.amort, V: b.V, R: b.R };
+  const m = metricsFor(c, o); const mx = maxLoanFor(c, o);
+  const termMax = o.amort ? POLICY.maxTermAmort : POLICY.maxTermIO;
+  const chip = (ok, txt) => `<span class="chip ${ok == null ? "c-grey" : ok ? "c-green" : "c-red"}">${txt}</span>`;
+  const rows = [
+    ["Loan size", money(o.L), o.L == null ? null : o.L >= POLICY.minLoan && o.L <= POLICY.maxLoan, "£250k to £10m"],
+    ["Term", o.T ? o.T + " years" : "-", o.T == null ? null : o.T >= POLICY.minTerm && o.T <= termMax, `${POLICY.minTerm} to ${termMax} years`],
+    ["LTV", pct(m.ltv), m.ltv == null ? null : m.ltv <= m.ltvMax + 1e-9, `up to ${m.ltvMax}%`],
+    ["ICR", times(m.icr), m.icr == null ? null : m.icr >= POLICY.minICR, `at least ${POLICY.minICR}x at ${m.rUsed}%`],
+  ].concat(o.amort ? [["DSCR", times(m.dscr), m.dscr == null ? null : m.dscr >= POLICY.minDSCR, `at least ${POLICY.minDSCR}x`]] : []);
+  const ok = rows.every((r) => r[2] !== false);
+  return { o, m, mx, ok, html: `<table class="t"><tbody>${rows.map((r) => `<tr><td><b>${r[0]}</b></td><td class="num">${esc(r[1])}</td><td>${chip(r[2], r[2] == null ? "Unknown" : r[2] ? "Within policy" : "Outside policy")}</td><td class="note">${esc(r[3])}</td></tr>`).join("")}</tbody></table>
+    <p class="hint">${ok ? "This structure is within the day-one policy limits." : "This structure is outside policy."} The largest loan within policy on these terms is <b>${money(mx.v)}</b>, limited by ${esc(mx.by)}.</p>` };
+}
+function renderWhatIf(c) {
+  const w = wiState(c); const r = wiResult(c); const v = rmView(c); const b = baseInputs(c);
+  return `<div class="card"><div class="cardhead"><h2>Try a different structure</h2>${v.structure ? `<span class="chip c-green">Proposed to credit</span>` : ""}</div>
+    <p class="hint">Change the loan, term or rate to see what would fit policy. This doesn't change the figures from the pack: the broker asked for ${money(b.L)}${b.T ? " over " + b.T + " years" : ""}.</p>
+    <div class="wigrid"><label>Loan (£)<input type="number" step="5000" data-wi="L" value="${w.L != null ? w.L : ""}"></label><label>Term (years)<input type="number" step="1" data-wi="T" value="${w.T != null ? w.T : ""}"></label><label>Pay rate (%)<input type="number" step="0.05" data-wi="rate" value="${w.rate != null ? w.rate : ""}"></label><label>Repayment<select data-wi="amort"><option value="0" ${!w.amort ? "selected" : ""}>Interest only</option><option value="1" ${w.amort ? "selected" : ""}>Amortising</option></select></label></div>
+    <div id="wiOut">${r.html}</div>
+    <div class="field"><label for="wiWhy">Why this structure (optional)</label><input id="wiWhy" type="text" value="${esc(v.structure && v.structure.why || "")}" placeholder="For example: the sponsor will put in more equity to bring the loan down"></div>
+    <div class="row"><button class="btn small" type="button" data-act="wi-max">Use the largest loan within policy</button><button class="btn small" type="button" data-act="wi-reset">Back to the broker's ask</button><button class="btn primary small" type="button" data-act="wi-propose">Propose this structure to credit</button>${v.structure ? `<button class="btn small" type="button" data-act="wi-clear">Remove the proposal</button>` : ""}</div></div>`;
+}
+function renderRmView(c) {
+  if (!c.memo) return renderWorking(c);
+  const v = rmView(c); const miss = rmViewMissing(c); const cq = creditQuestions(c);
+  const ro = !["rm", "returned"].includes(stageOf(c)) || currentRole !== "Relationship Manager";
+  const dis = ro ? "disabled" : "";
+  const opt = (k, val) => `<button class="opt" type="button" data-act="rmv-choice" data-key="${k}" data-choice="${esc(val)}" aria-pressed="${v.choice[k] === val}" ${dis}>${esc(val)}</button>`;
+  const qs = RMV_QS.map((x) => `<div class="rvq"><h3>${esc(x.label)}${x.req ? ` <span class="note">required</span>` : ""}</h3><p class="hint">${esc(x.ask)}</p>${x.choices ? `<div class="opts">${x.choices.map((ch) => opt(x.k, ch)).join("")}</div>` : ""}<textarea class="ed short" data-rmv="${x.k}" aria-label="${esc(x.label)}" ${dis}>${esc(v.a[x.k] || "")}</textarea></div>`).join("");
+  const cqs = cq.length ? cq.map((x) => `<div class="rvq"><h3>${esc(x.text)}</h3><p class="hint">${esc(x.why || "")}</p><textarea class="ed short" data-rmq="${esc(x.key)}" aria-label="${esc(x.text)}" ${dis}>${esc(v.qa[x.key] || "")}</textarea></div>`).join("") : `<p class="hint">Nothing flagged, so there are no obvious questions. Credit may still ask about the sponsor and the exit.</p>`;
+  const recs = ["Support", "Support with conditions", "Do not support"];
+  return `<p class="intro">The agents have read the pack and run the numbers. This is the part only you can add: what you know about the sponsor, the property and the deal that isn't written down. It goes into the credit memo as the RM assessment, kept separate from the agents' work.</p>
+    <div class="nextbar ${miss.length ? "" : "done"}"><div><span class="k">${miss.length ? "Still to add" : "Your view is complete"}</span><p>${miss.length ? esc(miss.join(", ")) : "It's in the credit memo. Send the case to credit from the memo when you're ready."}</p></div>${!miss.length && !ro ? `<button class="btn primary" type="button" data-tab="memo">Go to Send to credit</button>` : ""}</div>
+    <div class="grid2"><div class="stack">
+      <div class="card"><h2>What only you know</h2>${qs}</div>
+      <div class="card"><h2>Questions credit will ask</h2><p class="hint">Picked from the flags on this case. Answer them now so the Underwriter doesn't have to send the case back.</p>${cqs}</div>
+      <div class="card"><h2>Your recommendation <span class="note">required</span></h2><div class="opts">${recs.map((r) => `<button class="opt" type="button" data-act="rmv-rec" data-choice="${r}" aria-pressed="${v.rec === r}" ${dis}>${r}</button>`).join("")}</div>
+        <textarea class="ed short" data-rmv="__recWhy" aria-label="Why" placeholder="In a line or two, why" ${dis}>${esc(v.recWhy || "")}</textarea>
+        ${c.rec ? `<p class="note">The agents recommend: ${esc(c.rec.label)}.</p>` : ""}</div>
+    </div><div class="stack">${renderWhatIf(c)}
+      <div class="card"><h2>Stress tests</h2><p class="hint">How the case holds up if rates rise, rent falls or values drop.</p><div><button class="btn small" type="button" data-tab="fin">See the stress tests in Financials</button></div></div>
+    </div></div>`;
+}
+function renderStress(c) {
+  const rows = stressRows(c); if (!rows.length) return `<div class="card"><h2>Stress tests</h2><p class="hint">Needs the loan amount and passing rent.</p></div>`;
+  const b = baseInputs(c);
+  const cell = (v, f, rag) => v == null ? `<td class="num note">-</td>` : `<td class="num"><span class="chip ${rag === "green" ? "c-green" : rag === "amber" ? "c-amber" : "c-red"}">${f(v)}</span></td>`;
+  const st = rmView(c).stress || { shock: 0, rent: 0, value: 0 };
+  const cust = stressOne(c, b, st);
+  return `<div class="card"><div class="cardhead"><h2>Stress tests</h2><span class="note">Calculated in code, not by the AI</span></div>
+    <p class="hint">Green is within the day-one policy (ICR ${POLICY.minICR}x, LTV ${c.tenants.length === 1 ? POLICY.maxLTVSingle : POLICY.maxLTV}%${b.amort ? ", DSCR " + POLICY.minDSCR + "x" : ""}). Amber is below policy but within the ongoing covenants (ICR ${COVENANTS.icr}x, LTV ${COVENANTS.ltv}%${b.amort ? ", DSCR " + COVENANTS.dscr + "x" : ""}). Red breaches the covenant. Interest is at the higher of the pay rate and the ${POLICY.stressRate}% stress rate.</p>
+    <div class="tablewrap bare"><table class="t"><thead><tr><th>Scenario</th><th class="num">Rent</th><th class="num">Rate</th><th class="num">ICR</th><th class="num">LTV</th>${b.amort ? `<th class="num">DSCR</th>` : ""}</tr></thead><tbody>
+      ${rows.map((r) => `<tr><td><b>${esc(r.label)}</b></td><td class="num">${money(r.R)}</td><td class="num">${r.rate.toFixed(2)}%</td>${cell(r.icr, times, r.icrRag)}${cell(r.ltv, pct, r.ltvRag)}${b.amort ? cell(r.dscr, times, r.dscrRag) : ""}</tr>`).join("")}
+    </tbody></table></div>
+    <div class="label">Break-even points</div><ul class="obs">${stressBreakeven(c).map((x) => `<li><b>${esc(x.label)}:</b> ${esc(x.value)}. <span class="note">${esc(x.note)}</span></li>`).join("")}</ul>
+    <div class="label">Your own scenario</div>
+    <div class="wigrid"><label>Rates up (%)<input type="number" step="0.25" data-stress="shock" value="${st.shock}"></label><label>Rent change (%)<input type="number" step="5" data-stress="rent" value="${st.rent}"></label><label>Value change (%)<input type="number" step="5" data-stress="value" value="${st.value}"></label></div>
+    <div id="stressOut">${stressCustomHtml(c, cust, b)}</div></div>`;
+}
+function stressCustomHtml(c, r, b) {
+  const ch = (v, f, rag) => v == null ? "-" : `<span class="chip ${rag === "green" ? "c-green" : rag === "amber" ? "c-amber" : "c-red"}">${f(v)}</span>`;
+  return `<p>Rent ${money(r.R)}, rate ${r.rate.toFixed(2)}%: ICR ${ch(r.icr, times, r.icrRag)} · LTV ${ch(r.ltv, pct, r.ltvRag)}${b.amort ? ` · DSCR ${ch(r.dscr, times, r.dscrRag)}` : ""}</p>`;
+}
+function rmAssessmentSec(c) {
+  const t = rmViewText(c);
+  const canEdit = currentRole === "Relationship Manager" && ["rm", "returned"].includes(stageOf(c));
+  return `<section class="memo-sec rmsec"><header><h3>RM assessment</h3><span class="by">${t ? "Written by the Relationship Manager" : "Not added yet"}</span><span class="grow"></span>${canEdit ? `<button class="btn small" type="button" data-tab="rmview">${t ? "Edit in Your view" : "Add your view"}</button>` : ""}</header><div class="memo-body">${t ? renderRich(t) : `<p class="note">The RM's own view of the sponsor, the property and the deal. Added in Your view.</p>`}</div></section>`;
 }
 function renderAgentsTab(c) {
   return c.run ? `<div class="stack">${renderAgents(c)}</div>` : `<div class="card"><h2>Agents at work</h2><p class="hint">The agents have not run on this case yet.</p></div>`;
@@ -492,7 +609,8 @@ function renderFinancials(c) {
       <div class="card"><h2>Flags</h2>${flags}</div>
       ${obs ? `<div class="card"><h2>What the agent noticed</h2>${obs}</div>` : ""}
       ${f.missing.length ? `<div class="card"><h2>Still needed</h2><ul class="obs">${f.missing.map((m) => `<li>${esc(m)}</li>`).join("")}</ul></div>` : ""}
-    </div></div>`;
+    </div></div>
+    <div class="stack" style="margin-top:16px">${renderStress(c)}</div>`;
 }
 function renderPolicyTab(c) {
   const flagCards = [];
@@ -571,6 +689,7 @@ function renderReview(c) {
     const n = toCheckCount(c), m = c.consistency.length;
     main = `<div class="card"><h2>Step 1 of 6: read the handover</h2>
       <div class="memo-sec"><header><h3>Note from ${esc(c.submitted ? c.submitted.by : "the RM")}</h3></header><div class="memo-body">${c.submitted && c.submitted.note ? renderRich(c.submitted.note) : '<p class="note">The RM didn\'t add a note.</p>'}</div></div>
+      ${rmViewStarted(c) ? `<div class="memo-sec rmsec"><header><h3>RM assessment</h3></header><div class="memo-body">${renderRich(rmViewText(c))}</div></div>` : ""}
       <div class="label">What the RM left open</div>
       <ul class="ready"><li class="${n ? "todo" : "ok"}">${n ? `${n} field${n > 1 ? "s" : ""} not checked by the RM` : "Every field checked by the RM"}</li><li class="${m ? "todo" : "ok"}">${m ? `${m} mismatch${m > 1 ? "es" : ""} between documents` : "No mismatches between documents"}</li><li class="${c.rec.exceptions.length ? "todo" : "ok"}">${c.rec.exceptions.length ? "Policy exception: " + esc(c.rec.exceptions.join(", ")) : "No policy exception"}</li></ul>
       <div class="ask"><h3>Is the case ready for you to review?</h3><p class="hint">If something big is missing, send it straight back. Otherwise NashFlow takes you through ${fl.length ? fl.length + " flag" + (fl.length > 1 ? "s" : "") : "the numbers"} next.</p>
@@ -1170,7 +1289,7 @@ document.addEventListener("click", async (e) => {
     editingSection = null; save(); render();
   }
   else if (act === "copy-memo") {
-    const txt = `CREDIT MEMO: ${c.title} (${c.ref})\n\n` + MEMO_SECTIONS.map(([k, n]) => `${n.toUpperCase()}\n${(c.memo[k] || {}).text || ""}`).join("\n\n");
+    const txt = `CREDIT MEMO: ${c.title} (${c.ref})\n\n` + MEMO_SECTIONS.map(([k, n]) => (k === "recommendation" && rmViewText(c) ? `RM ASSESSMENT\n${rmViewText(c)}\n\n` : "") + `${n.toUpperCase()}\n${(c.memo[k] || {}).text || ""}`).join("\n\n");
     copyText(txt, "Memo copied");
   }
   else if (act === "copy-req") { c.brokerRequest = $("#brokerReq").value; save(); copyText(c.brokerRequest, "Email copied"); }
@@ -1187,7 +1306,15 @@ document.addEventListener("click", async (e) => {
     const k = t.dataset.key; c.comments = c.comments || {}; (c.comments[k] = c.comments[k] || []).push({ who: actor(), at: nowISO(), text: txt });
     audit(c, actor(), `Commented on "${MEMO_SECTIONS.find((x) => x[0] === k)[1]}": ${txt}`); commenting = null; save(); render();
   }
+  else if (act === "rmv-choice") { const v = rmView(c); v.choice[t.dataset.key] = v.choice[t.dataset.key] === t.dataset.choice ? "" : t.dataset.choice; save(); render(); }
+  else if (act === "rmv-rec") { const v = rmView(c); v.rec = t.dataset.choice; audit(c, actor(), "Recorded the RM recommendation: " + v.rec); save(); render(); }
+  else if (act === "wi-max") { const w = wiState(c); const r = wiResult(c); w.L = r.mx.v; save(); render(); }
+  else if (act === "wi-reset") { const v = rmView(c); v.wi = null; save(); render(); }
+  else if (act === "wi-propose") { const r = wiResult(c); const v = rmView(c); v.structure = { L: r.o.L, T: r.o.T, rate: r.o.rate, amort: r.o.amort, ltv: r.m.ltv, icr: r.m.icr, dscr: r.m.dscr, why: ($("#wiWhy") && $("#wiWhy").value || "").trim(), at: nowISO() }; audit(c, actor(), `Proposed a different structure: ${money(r.o.L)} over ${r.o.T} years`); save(); render(); toast("Structure added to your view in the memo"); }
+  else if (act === "wi-clear") { rmView(c).structure = null; save(); render(); }
   else if (act === "submit-uw") {
+    const mv = rmViewMissing(c);
+    if (mv.length) { toast("Add your view first: " + mv.join(", ")); currentTab = "rmview"; render(); window.scrollTo(0, 0); return; }
     const note = ($("#rmNote") && $("#rmNote").value || "").trim();
     c.submitted = { by: actor(), at: nowISO(), note }; if (c.review) { c.review.step = 0; c.review.flag = 0; } c.stage = "uw"; c.status = STAGES.uw; c.returned = null;
     (c.handoffs = c.handoffs || []).push({ at: nowISO(), who: actor(), what: "Submitted to the Underwriter", note });
@@ -1310,6 +1437,15 @@ document.addEventListener("click", async (e) => {
   }
   else if (act === "reopen") { audit(c, actor(), `Reopened the decision (${c.decision.choice})`); c.decision = null; c.stage = "uw"; c.status = STAGES.uw; save(); render(); }
 });
+/* the RM's view, the structure what-if and the custom stress test update as you type */
+document.addEventListener("input", (e) => {
+  const t = e.target; const c = cur(); if (!c) return;
+  if (t.dataset.rmv) { const v = rmView(c); if (t.dataset.rmv === "__recWhy") v.recWhy = t.value; else v.a[t.dataset.rmv] = t.value; save(); }
+  else if (t.dataset.rmq) { rmView(c).qa[t.dataset.rmq] = t.value; save(); }
+  else if (t.dataset.wi) { const w = wiState(c); w[t.dataset.wi] = t.dataset.wi === "amort" ? t.value === "1" : t.value === "" ? null : +t.value; save(); const o = $("#wiOut"); if (o) o.innerHTML = wiResult(c).html; }
+  else if (t.dataset.stress) { const v = rmView(c); v.stress = v.stress || { shock: 0, rent: 0, value: 0 }; v.stress[t.dataset.stress] = +t.value || 0; save(); const o = $("#stressOut"); if (o) o.innerHTML = stressCustomHtml(c, stressOne(c, baseInputs(c), v.stress), baseInputs(c)); }
+});
+document.addEventListener("change", (e) => { if (e.target.dataset && e.target.dataset.wi === "amort") { const c = cur(); if (c) { wiState(c).amort = e.target.value === "1"; save(); const o = $("#wiOut"); if (o) o.innerHTML = wiResult(c).html; } } });
 /* keep what the Underwriter types in the guided review, so a background update does not lose it */
 document.addEventListener("input", (e) => {
   if (e.target.id !== "rvNote") return;
