@@ -416,7 +416,8 @@ try {
   const hp = new URLSearchParams(location.hash.slice(1));
   if (hp.get("gk")) settings.geminiKey = hp.get("gk");
   if (hp.get("ck")) { settings.claudeKey = hp.get("ck"); settings.provider = "claude-api"; }
-  if (hp.get("gk") || hp.get("ck")) { store("nashflow.settings", settings); history.replaceState(null, "", location.pathname + location.search); }
+  if (hp.get("chk")) settings.chKey = hp.get("chk");
+  if (hp.get("gk") || hp.get("ck") || hp.get("chk")) { store("nashflow.settings", settings); history.replaceState(null, "", location.pathname + location.search); }
 } catch (e) { /* no key in the link */ }
 if (/^gemini-(1|2)\./.test(settings.geminiModel || "")) { settings.geminiModel = GEMINI_DEFAULT; store("nashflow.settings", settings); }
 let sampleFn = null;
@@ -1053,7 +1054,7 @@ function systemSections(c) {
   const pol = c.checks.concat(c.judgements).map((k) => `- ${k.area} (${k.clause}): ${k.outcome}. ${k.type === "Calculated" ? k.why : k.explanation}${k.source && k.source.doc ? ` [${k.source.doc} p${k.source.page || 1}]` : ""}`).join("\n");
   const rec = `Recommendation: ${c.rec.label}.\n\nWhy, most important first:\n\n` + (c.rec.reasons.length ? c.rec.reasons.map((r) => "- " + r.text).join("\n") : "- All provisions pass and no material issues were found.");
   return {
-    external: "Companies House, Land Registry and credit bureau checks are not connected in this prototype. In the product, Companies House is checked live and Land Registry and bureau results are mocked for the MVP.",
+    external: (typeof chText === "function" && chText(c)) || "Companies House, Land Registry and credit bureau checks are not connected in this prototype. In the product, Companies House is checked live and Land Registry and bureau results are mocked for the MVP.",
     policy: `Assessed against the ${POLICY.name} (${POLICY.version}). Numeric limits are calculated, not judged by the AI.\n\n${pol}`,
     recommendation: rec,
     sensitivity: "Calculated in code from the extracted figures. Covenant levels come from the credit policy, section 7.2 Standard financial covenants: LTV no more than " + COVENANTS.ltv + "%, ICR at least " + COVENANTS.icr + "x, DSCR at least " + COVENANTS.dscr + "x if amortising. " + POLICY.covTesting + ".\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate.") + stressText(c),
