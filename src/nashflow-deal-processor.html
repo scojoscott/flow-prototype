@@ -403,6 +403,8 @@ const POLICY = {
   minLoan: 250000, maxLoan: 10000000, minTerm: 3, maxTermIO: 15, maxTermAmort: 25,
   maxLTV: 70, maxLTVSingle: 65, minICR: 1.5, stressRate: 6.5, minDSCR: 1.25,
   minWAULT: 3, concentration: 50, accountsMonths: 12, uwLimit: 1000000,
+  /* 7.2 Standard financial covenants: ongoing tests in the facility agreement, with headroom over the day-one limits */
+  covLTV: 75, covICR: 1.35, covDSCR: 1.15, covTesting: "LTV annually on a lender-instructed valuation; ICR and DSCR quarterly on a 12-month rolling basis",
 };
 const JUDGEMENT_AREAS = [
   { area: "Property type", clause: "7.1 Property type", rule: "Retail, office, industrial and mixed use. Specialist uses (for example petrol stations, hotels) by exception." },
@@ -797,7 +799,7 @@ ${JUDGEMENT_AREAS.map((j) => `   - ${j.area}: ${j.rule}`).join("\n")}
    - financial_analysis: LTV, ICR at the pay rate and under stress, DSCR if amortising, debt yield and the sensitivities, with headroom against policy, and what the accounts show using the FINANCIAL SPREAD (income and profit trend, interest cover from the accounts, gearing, cash, guarantor net worth; mark its ratios as (calculated)). One or two paragraphs, then "- " lines for each red or amber flag with the reason.
    - exit: how the loan is repaid at maturity (refinance or sale), whether the asset should be refinanceable then given lease events before maturity and the LTV and ICR at maturity, and what could stop it.
    - risks: 5 to 8 "- Risk: ... Mitigant: ..." lines, most important first, specific to this deal.
-   - covenants: proposed financial covenants using the SENSITIVITIES (LTV and ICR levels with headroom), then information undertakings (annual accounts, quarterly rent roll, lender's right to revalue). Say the levels are proposed.
+   - covenants: the financial covenants from the credit policy, section 7.2 (LTV no more than ${COVENANTS.ltv}%, ICR at least ${COVENANTS.icr}x, DSCR at least ${COVENANTS.dscr}x if amortising; ${POLICY.covTesting}), with the headroom this deal has against each from the SENSITIVITIES, citing the policy as (policy 7.2); then information undertakings (annual accounts, quarterly rent roll, lender's right to revalue).
    - conditions: a "**Conditions precedent**" list and a "**Conditions subsequent**" list, specific to this deal (for example lender-instructed RICS valuation, report on title, redemption statement, KYC and AML on directors and PSCs, personal guarantees with independent legal advice, buildings insurance with the lender noted, a new lease for a tenant holding over).
 3. broker_request: if anything is Not present, Not confident, out of date or inconsistent, draft one short polite email to the broker (first name) listing each item needed as "- " lines, signed "[Your name]". Otherwise "".
 
@@ -963,7 +965,7 @@ function computeChecks(c) {
 }
 
 /* ------------------------------------------------------------------ sensitivities and covenant headroom (calculated) */
-const COVENANTS = { ltv: 75, icr: 1.35 }; // illustrative proposed covenant levels, not from a lender
+const COVENANTS = { ltv: POLICY.covLTV, icr: POLICY.covICR, dscr: POLICY.covDSCR }; // from the credit policy, section 7.2 (illustrative)
 function computeAnalysis(c) {
   const out = []; const add = (label, value, note) => out.push({ label, value, note });
   const L = num(c, "loan_amount"), V = num(c, "property_value"), R = num(c, "annual_rent"), rate = num(c, "interest_rate_pct"), T = num(c, "loan_term_years");
@@ -979,12 +981,12 @@ function computeAnalysis(c) {
     const withRent = c.tenants.filter((t) => t.annual_rent > 0);
     if (withRent.length > 1) { const top = withRent.slice().sort((a, b) => b.annual_rent - a.annual_rent)[0]; add("ICR if the largest tenant leaves", times((R - top.annual_rent) / interest), `Without ${top.name} (${money(top.annual_rent)}).`); }
     add("Break-even occupancy", pct((interest / R) * 100, 0), "Share of the passing rent needed to pay interest.");
-    add("Rent fall before ICR covenant breach", pct(Math.max(0, (1 - (COVENANTS.icr * interest) / R) * 100), 0), `Against a proposed ICR covenant of ${COVENANTS.icr}x.`);
+    add("Rent fall before ICR covenant breach", pct(Math.max(0, (1 - (COVENANTS.icr * interest) / R) * 100), 0), `Against the policy ICR covenant of ${COVENANTS.icr}x.`);
   }
   if (L != null && V != null) {
     add("LTV if value falls 10%", pct((L / (V * 0.9)) * 100), "");
     add("LTV if value falls 20%", pct((L / (V * 0.8)) * 100), "");
-    add("Value fall before LTV covenant breach", pct(Math.max(0, (1 - L / (COVENANTS.ltv / 100) / V) * 100), 0), `Against a proposed LTV covenant of ${COVENANTS.ltv}%.`);
+    add("Value fall before LTV covenant breach", pct(Math.max(0, (1 - L / (COVENANTS.ltv / 100) / V) * 100), 0), `Against the policy LTV covenant of ${COVENANTS.ltv}%.`);
   }
   if (T != null && c.tenants.length && R) {
     const end = new Date(); end.setFullYear(end.getFullYear() + T);
@@ -1044,7 +1046,7 @@ function systemSections(c) {
     external: "Companies House, Land Registry and credit bureau checks are not connected in this prototype. In the product, Companies House is checked live and Land Registry and bureau results are mocked for the MVP.",
     policy: `Assessed against the ${POLICY.name} (${POLICY.version}). Numeric limits are calculated, not judged by the AI.\n\n${pol}`,
     recommendation: rec,
-    sensitivity: "Calculated in code from the extracted figures. Proposed covenant levels (LTV " + COVENANTS.ltv + "%, ICR " + COVENANTS.icr + "x) are illustrative, not from a lender.\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate."),
+    sensitivity: "Calculated in code from the extracted figures. Covenant levels come from the credit policy, section 7.2 Standard financial covenants: LTV no more than " + COVENANTS.ltv + "%, ICR at least " + COVENANTS.icr + "x, DSCR at least " + COVENANTS.dscr + "x if amortising. " + POLICY.covTesting + ".\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate."),
   };
 }
 function refreshSystemSections(c) {
@@ -1094,7 +1096,7 @@ function conditionsPrompt(c) {
   const tenants = (c.tenants || []).map((t) => `- ${t.name}: ${money(t.annual_rent)}, lease end ${t.lease_end || "not clear"}${t.break_date ? ", break " + t.break_date : ""}${t.note ? " (" + t.note + ")" : ""}`).join("\n") || "- None listed";
   return `You are the conditions agent in NashFlow, a commercial property lending tool for a UK specialist lender. Propose the conditions for this loan for the Underwriter to accept or reject. The Underwriter decides; you suggest.
 
-Use the lender's base set below where it applies to this case, and add case-specific conditions for the risks in this case (for example a vacant unit, a tenant holding over, a short WAULT, a low EPC, a policy exception, a mismatch in the figures). Do not include base conditions that do not apply (for example a redemption statement on a purchase). Keep each condition to one sentence in plain UK English. For covenants, use the proposed levels: LTV ${COVENANTS.ltv}% maximum, ICR ${COVENANTS.icr}x minimum.
+Use the lender's base set below where it applies to this case, and add case-specific conditions for the risks in this case (for example a vacant unit, a tenant holding over, a short WAULT, a low EPC, a policy exception, a mismatch in the figures). Do not include base conditions that do not apply (for example a redemption statement on a purchase). Keep each condition to one sentence in plain UK English. For financial covenants, use the levels in the lender's credit policy, section 7.2: LTV ${COVENANTS.ltv}% maximum, ICR ${COVENANTS.icr}x minimum, DSCR ${COVENANTS.dscr}x minimum if amortising, tested as follows: ${POLICY.covTesting}.
 
 Base set:
 ${BASE_CONDITIONS.map(([t, x], i) => `B${i + 1}. [${t}] ${x}`).join("\n")}
@@ -1600,7 +1602,7 @@ function renderPolicyTab(c) {
   return `<div class="stack">
     ${flagCards.length ? `<div class="flags">${flagCards.map((f) => `<div class="flag ${f.tone}"><div class="row"><span class="chip ${f.tone === "red" ? "c-red" : f.tone === "amber" ? "c-amber" : "c-green"}">${f.label}</span><b>${esc(f.title)}</b></div><p>${esc(f.text)}</p>${f.refs.length ? `<div class="row">${f.refs.map((r) => refChip(r.doc, r.page, r.quote)).join("")}</div>` : ""}</div>`).join("")}</div>` : ""}
     <div class="card"><h2>Calculated checks</h2><p class="hint">Worked out in code from the extracted figures, so the answer is exact and repeatable. The AI does not judge these. ${esc(POLICY.name)}, ${esc(POLICY.version)}.</p><div class="tablewrap"><table class="t"><thead><tr><th>Provision</th><th>Policy</th><th>Case</th><th>Outcome</th><th>Explanation</th></tr></thead><tbody>${c.checks.map(row).join("")}</tbody></table></div></div>
-    ${(c.analysis || []).length ? `<div class="card"><h2>Sensitivities and covenant headroom</h2><p class="hint">Calculated in code. Proposed covenants (LTV ${COVENANTS.ltv}%, ICR ${COVENANTS.icr}x) are illustrative, not from a lender.</p><div class="tablewrap"><table class="t"><thead><tr><th>Measure</th><th>Result</th><th>Comment</th></tr></thead><tbody>${c.analysis.map((a) => `<tr><td><b>${esc(a.label)}</b></td><td class="fv">${esc(a.value)}</td><td>${esc(a.note)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
+    ${(c.analysis || []).length ? `<div class="card"><h2>Sensitivities and covenant headroom</h2><p class="hint">Calculated in code. Covenants from the credit policy, section 7.2: LTV ${COVENANTS.ltv}%, ICR ${COVENANTS.icr}x.</p><div class="tablewrap"><table class="t"><thead><tr><th>Measure</th><th>Result</th><th>Comment</th></tr></thead><tbody>${c.analysis.map((a) => `<tr><td><b>${esc(a.label)}</b></td><td class="fv">${esc(a.value)}</td><td>${esc(a.note)}</td></tr>`).join("")}</tbody></table></div></div>` : ""}
     <div class="card"><h2>Judgement areas</h2><p class="hint">Assessed by the memo agent and explained, for a person to read and agree or not.</p>${c.judgements.length ? `<div class="tablewrap"><table class="t"><thead><tr><th>Provision</th><th>Policy</th><th></th><th>Outcome</th><th>Explanation</th></tr></thead><tbody>${c.judgements.map(row).join("")}</tbody></table></div>` : `<p class="hint">Not assessed yet.</p>`}</div>
   </div>`;
 }
@@ -1705,6 +1707,7 @@ function renderPolicyAdmin() {
     ["Borrower", "UK limited company or SPV; personal guarantees from principal directors", "Reasoned"],
     ["Experience", "Borrower or directors have relevant property investment experience", "Reasoned"],
     ["Adverse credit", "No unsatisfied CCJs or insolvency events; explained historic adverse considered", "Reasoned"],
+    ["Standard covenants (7.2)", `LTV no more than ${P.covLTV}%, ICR at least ${P.covICR}x, DSCR at least ${P.covDSCR}x if amortising. ${P.covTesting}. Set with headroom over the day-one limits so a small dip does not cause a breach`, "Calculated"],
     ["Approval authority", "Underwriter approves every case up to £10m, including policy exceptions with a recorded reason; over £10m outside appetite. No Credit Committee", "Calculated"],
   ];
   return pageHead("Credit policies", "Credit policies", "The policy the agents test each case against. This prototype uses the illustrative UK market standard policy from the broker submission flow doc. In the product, the Client Admin uploads the lender's own policy and an agent extracts the rules with links to each clause.") +
