@@ -1066,7 +1066,8 @@ async function runConditions(c) {
   c.conditionsRun = { running: true, error: null }; render();
   try {
     const r = await askAI(conditionsPrompt(c), [], "conditions");
-    c.conditions = (r.conditions || []).filter((x) => x && x.text).map((x, i) => ({ id: "K" + (i + 1), type: x.type || "Condition precedent", text: String(x.text), from: /^B\d+$/.test(String(x.from || "")) ? "Base set" : "Case specific", reason: x.reason || "", status: "suggested", by: "Conditions agent" }));
+    const keepOwn = (c.conditions || []).filter((x) => x.from === "Added by Underwriter");
+    c.conditions = (r.conditions || []).filter((x) => x && x.text).map((x, i) => ({ id: "K" + (i + 1), type: x.type || "Condition precedent", text: String(x.text), from: /^B\d+$/.test(String(x.from || "")) ? "Base set" : "Case specific", reason: x.reason || "", status: "suggested", by: "Conditions agent" })).concat(keepOwn);
     audit(c, "Conditions agent", `Suggested ${c.conditions.length} conditions (${c.conditions.filter((x) => x.from === "Base set").length} from the base set, ${c.conditions.filter((x) => x.from !== "Base set").length} case specific)`, "agent");
     c.conditionsRun = { running: false, error: null };
   } catch (e) {

@@ -3,8 +3,10 @@
  * Use made-up or anonymised deal packs only. Whatever reaches this inbox passes through Google.
  *
  * What it does
- *   list  : returns new emails in the inbox (last 14 days) with their attachments
- *   done  : marks an email as picked up so it is not returned again
+ *   list  : returns the emails in the inbox (last 14 days), without attachments. Every browser
+ *           sees the same list and remembers for itself which ones it has already picked up.
+ *   get   : returns one email with its attachments
+ *   done  : labels the email "NashFlow picked up" in Gmail (it still shows for other browsers)
  *   send  : replies to the broker in the same email thread (or sends a new email)
  *   ping  : checks the connection
  *
@@ -33,7 +35,8 @@ function handle_(p) {
   if (!p.key || p.key !== KEY) return out_({ error: "The key does not match the one in the script." });
   try {
     if (p.action === "ping") return out_({ ok: true, inbox: Session.getEffectiveUser().getEmail() });
-    if (p.action === "list") return out_({ ok: true, messages: listNew_() });
+    if (p.action === "list") return out_({ ok: true, version: 2, messages: listAll_() });
+    if (p.action === "get") return out_({ ok: true, message: getOne_(p.id) });
     if (p.action === "done") { markDone_(p.id); return out_({ ok: true }); }
     if (p.action === "send") return out_(send_(p));
     return out_({ error: "Unknown action." });
@@ -42,29 +45,33 @@ function handle_(p) {
   }
 }
 
-function listNew_() {
+function listAll_() {
   const me = Session.getEffectiveUser().getEmail().toLowerCase();
-  const props = PropertiesService.getScriptProperties();
-  const threads = GmailApp.search("in:inbox newer_than:14d", 0, 15);
+  const threads = GmailApp.search("in:inbox newer_than:14d", 0, 20);
   const found = [];
   threads.forEach(function (t) {
     t.getMessages().forEach(function (m) {
-      if (found.length >= 3) return;
-      if (props.getProperty("done:" + m.getId())) return;
+      if (found.length >= 40) return;
       if (m.getFrom().toLowerCase().indexOf(me) >= 0) return; // our own replies
-      const atts = m.getAttachments({ includeInlineImages: false, includeAttachments: true })
-        .filter(function (a) { return a.getSize() <= MAX_ATTACHMENT_BYTES; })
-        .map(function (a) { return { name: a.getName(), type: a.getContentType(), b64: Utilities.base64Encode(a.getBytes()) }; });
-      found.push({ id: m.getId(), threadId: t.getId(), from: m.getFrom(), to: m.getTo(), subject: m.getSubject(),
-        date: m.getDate().toISOString(), body: m.getPlainBody().slice(0, 60000), attachments: atts });
+      found.push({ id: m.getId(), threadId: t.getId(), from: m.getFrom(), subject: m.getSubject(), date: m.getDate().toISOString() });
     });
   });
+  found.sort(function (x, y) { return x.date < y.date ? -1 : 1; }); // oldest first, so replies follow the email they answer
   return found;
+}
+
+function getOne_(id) {
+  const m = id && GmailApp.getMessageById(id);
+  if (!m) throw new Error("Email not found.");
+  const atts = m.getAttachments({ includeInlineImages: false, includeAttachments: true })
+    .filter(function (a) { return a.getSize() <= MAX_ATTACHMENT_BYTES; })
+    .map(function (a) { return { name: a.getName(), type: a.getContentType(), b64: Utilities.base64Encode(a.getBytes()) }; });
+  return { id: m.getId(), threadId: m.getThread().getId(), from: m.getFrom(), to: m.getTo(), subject: m.getSubject(),
+    date: m.getDate().toISOString(), body: m.getPlainBody().slice(0, 60000), attachments: atts };
 }
 
 function markDone_(id) {
   if (!id) return;
-  PropertiesService.getScriptProperties().setProperty("done:" + id, new Date().toISOString());
   const m = GmailApp.getMessageById(id);
   if (m) {
     const label = GmailApp.getUserLabelByName(LABEL) || GmailApp.createLabel(LABEL);
