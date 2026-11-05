@@ -853,6 +853,9 @@ function renderSettings() {
 
 /* ------------------------------------------------------------------ deals inbox (Gmail demo inbox via Google Apps Script) */
 const INBOX_SCRIPT = /*__GAS__*/"";
+/* Built-in demo inbox, so everyone who opens the page sees the same emails. Demo use only: the page is public, so anyone who reads it can use this inbox. */
+const DEMO_INBOX = { url: "https://script.google.com/macros/s/AKfycbyG7UV-PqSRIcpCq5RJ-fd63eKydUqUamHiM0vNCRappOT0-6XHNIGtYoEJWqhJQFlm/exec", key: "brokerflowgetsitdone" };
+if (DEMO_INBOX.url && !settings.inboxUrl) { settings.inboxUrl = DEMO_INBOX.url; settings.inboxKey = DEMO_INBOX.key; if (settings.inboxAuto == null) settings.inboxAuto = true; }
 let inboxBusy = false;
 let inboxState = Object.assign({ last: null, error: "", log: [] }, load("nashflow.inbox.state", {}));
 const inboxSeen = new Set(load("nashflow.inbox.seen", []));
@@ -909,8 +912,11 @@ async function pollInbox(manual) {
   inboxBusy = true;
   try {
     const r = await inboxCall("list");
-    for (const m of r.messages || []) {
-      if (inboxSeen.has(m.id)) { await inboxCall("done", { id: m.id }).catch(() => {}); continue; }
+    let picked = 0;
+    for (let m of r.messages || []) {
+      if (inboxSeen.has(m.id)) { if (!r.version) await inboxCall("done", { id: m.id }).catch(() => {}); continue; }
+      if (m.body == null) m = (await inboxCall("get", { id: m.id })).message; // version 2 script: the list has no attachments
+      picked++;
       const files = [emailFile(m)].concat((m.attachments || []).map((a) => new File([b64ToBytes(a.b64)], a.name, { type: a.type || "application/octet-stream" })));
       const existing = cases.find((x) => x.source && x.source.threadId === m.threadId);
       inboxSeen.add(m.id); store("nashflow.inbox.seen", [...inboxSeen]);
@@ -935,7 +941,7 @@ async function pollInbox(manual) {
     }
     await chaseReminders();
     inboxState.last = nowISO(); inboxState.error = "";
-    if (manual) toast((r.messages || []).length ? `Picked up ${r.messages.length} email${r.messages.length > 1 ? "s" : ""}` : "No new emails");
+    if (manual) toast(picked ? `Picked up ${picked} email${picked > 1 ? "s" : ""}` : "No new emails");
   } catch (e) {
     inboxState.error = e.message || String(e);
     if (manual) toast(inboxState.error);
@@ -1225,6 +1231,14 @@ document.addEventListener("click", async (e) => {
     save(); render();
   }
   else if (act === "reopen") { audit(c, actor(), `Reopened the decision (${c.decision.choice})`); c.decision = null; c.stage = "uw"; c.status = STAGES.uw; save(); render(); }
+});
+/* keep what the Underwriter types in the guided review, so a background update does not lose it */
+document.addEventListener("input", (e) => {
+  if (e.target.id !== "rvNote") return;
+  const c = cur(); if (!c || !c.review) return;
+  const R = c.review;
+  if (R.step === 1) { const f = reviewFlags(c)[R.flag]; if (f && R.answers[f.key]) R.answers[f.key].note = e.target.value.trim(); }
+  else if (R.step === 2 && R.comfort) R.comfort.note = e.target.value.trim();
 });
 document.addEventListener("change", (e) => {
   if (e.target.name === "decChoice") { readDecisionForm(); render(); }

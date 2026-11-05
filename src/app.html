@@ -411,6 +411,11 @@ const PROVIDERS = {
 const GEMINI_DEFAULT = "gemini-3.8-flash";
 let geminiSessionModel = null; // a fallback used for the rest of this visit when the chosen model is busy
 let settings = Object.assign({ provider: "auto", geminiKey: "", geminiModel: GEMINI_DEFAULT, claudeKey: "", claudeModel: "claude-sonnet-5-5", azureEndpoint: "", azureDeployment: "", azureKey: "", azureVersion: "2024-10-21" }, load("nashflow.settings", {}));
+/* Demo links can carry a Gemini key after the # (for example .../#gk=KEY). It is saved in this browser and removed from the address bar, so the key is never in the code or sent to the web server. */
+try {
+  const hp = new URLSearchParams(location.hash.slice(1));
+  if (hp.get("gk")) { settings.geminiKey = hp.get("gk"); store("nashflow.settings", settings); history.replaceState(null, "", location.pathname + location.search); }
+} catch (e) { /* no key in the link */ }
 if (/^gemini-(1|2)\./.test(settings.geminiModel || "")) { settings.geminiModel = GEMINI_DEFAULT; store("nashflow.settings", settings); }
 let sampleFn = null;
 let sampleChecked = false;
@@ -1066,7 +1071,8 @@ async function runConditions(c) {
   c.conditionsRun = { running: true, error: null }; render();
   try {
     const r = await askAI(conditionsPrompt(c), [], "conditions");
-    c.conditions = (r.conditions || []).filter((x) => x && x.text).map((x, i) => ({ id: "K" + (i + 1), type: x.type || "Condition precedent", text: String(x.text), from: /^B\d+$/.test(String(x.from || "")) ? "Base set" : "Case specific", reason: x.reason || "", status: "suggested", by: "Conditions agent" }));
+    const keepOwn = (c.conditions || []).filter((x) => x.from === "Added by Underwriter");
+    c.conditions = (r.conditions || []).filter((x) => x && x.text).map((x, i) => ({ id: "K" + (i + 1), type: x.type || "Condition precedent", text: String(x.text), from: /^B\d+$/.test(String(x.from || "")) ? "Base set" : "Case specific", reason: x.reason || "", status: "suggested", by: "Conditions agent" })).concat(keepOwn);
     audit(c, "Conditions agent", `Suggested ${c.conditions.length} conditions (${c.conditions.filter((x) => x.from === "Base set").length} from the base set, ${c.conditions.filter((x) => x.from !== "Base set").length} case specific)`, "agent");
     c.conditionsRun = { running: false, error: null };
   } catch (e) {
