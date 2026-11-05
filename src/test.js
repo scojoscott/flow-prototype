@@ -125,7 +125,7 @@ const conditions = { conditions: [
   await page.screenshot({ path: OUT + "/3d-financials.png", fullPage: true });
   await page.click('button[data-tab="policy"]');
   await page.screenshot({ path: OUT + "/4-policy.png", fullPage: true });
-  await page.click('button[data-tab="decision"]');
+  await page.click('button[data-tab="memo"]');
   await page.screenshot({ path: OUT + "/5-decision.png", fullPage: true });
   await page.click('button[data-view="cases"]');
   await page.screenshot({ path: OUT + "/6-cases.png" });
@@ -139,7 +139,11 @@ const conditions = { conditions: [
   console.log("ICR tile after edit:", icr.replace(/\n/g, " | "));
   await page.click('button[data-tab="memo"]');
   console.log("Stale banner:", await page.locator(".stale").count());
-  await page.click('button[data-tab="decision"]');
+  console.log("Memo refs highlighted:", await page.evaluate(() => { const bs = [...document.querySelectorAll(".memocard button.ref[data-ctx]")]; return bs.filter((b) => quoteFor(cur(), b.dataset.src, b.dataset.page, b.dataset.ctx)).length + " of " + bs.length; }));
+  await page.locator(".memocard button.ref[data-ctx]").first().click();
+  console.log("Memo ref panel:", await page.locator("#srcBody .qnote").count() ? await page.locator("#srcBody .qnote").innerText() : "no highlight");
+  await page.screenshot({ path: OUT + "/3e-memo-ref.png" });
+  await page.keyboard.press("Escape");
   await page.fill("#rmNote", "Rent confirmed at £158k with the broker. Unit 6 lease renewal in hand.");
   await page.screenshot({ path: OUT + "/5a-rm-submit.png", fullPage: true });
   await page.click('button[data-act="submit-uw"]');
@@ -206,7 +210,7 @@ const conditions = { conditions: [
   await page.click('button[data-view="new"]');
   await page.click('button[data-sample="inconsistent"]');
   await page.waitForSelector(".memo-sec", { timeout: 20000 });
-  await page.click('button[data-tab="decision"]');
+  await page.click('button[data-tab="memo"]');
   await page.click('button[data-act="submit-uw"]');
   await page.click('.rolebox button[data-role="Underwriter"]');
   await page.click('button[data-view="cases"]');
@@ -242,7 +246,7 @@ const conditions = { conditions: [
   console.log("After return:", await page.locator(".casecard .chip.c-amber").first().innerText());
   await page.click('.rolebox button[data-role="Relationship Manager"]');
   console.log("RM next bar:", await page.locator(".nextbar p").innerText());
-  await page.click('.nextbar button[data-tab="decision"]');
+  if (await page.locator('.nextbar button[data-tab="memo"]').count()) await page.click('.nextbar button[data-tab="memo"]'); else await page.click('button[data-tab="memo"]');
   console.log("RM sees return note:", await page.locator(".errbox").count());
   await page.click('button[data-act="submit-uw"]');
   await page.click('.rolebox button[data-role="Underwriter"]');
