@@ -127,6 +127,13 @@ const conditions = { conditions: [
   await page.screenshot({ path: OUT + "/4-policy.png", fullPage: true });
   await page.click('button[data-tab="memo"]');
   await page.screenshot({ path: OUT + "/5-decision.png", fullPage: true });
+  console.log("Rec bar:", (await page.locator(".recbar").first().innerText()).replace(/\n/g, " / ").slice(0, 400));
+  console.log("Memo sensitivity:", await page.evaluate(() => cur().memo.sensitivity.text.length), "chars");
+  await page.click('.procbtn');
+  console.log("Processes:", await page.locator(".proc").count());
+  await page.screenshot({ path: OUT + "/0-processes.png", fullPage: true });
+  await page.click('button[data-view="case"]');
+  await page.click('button[data-tab="memo"]');
   await page.click('button[data-view="cases"]');
   await page.screenshot({ path: OUT + "/6-cases.png" });
   // edit field: fix rent to 186000 to see recompute

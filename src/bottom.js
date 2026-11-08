@@ -44,10 +44,30 @@ const ROLE_INFO = {
   Underwriter: "Reviews each submitted case, sets conditions and decides credit.",
   Commercial: "Approves pricing. Cannot decide credit.",
 };
-const ROLE_VIEWS = { "Relationship Manager": ["new", "cases", "case", "inbox", "policy", "agents"], Underwriter: ["cases", "case", "policy", "agents"], Commercial: ["cases", "case", "grid", "policy"] };
+const ROLE_VIEWS = { "Relationship Manager": ["new", "cases", "case", "inbox", "policy", "agents", "processes"], Underwriter: ["cases", "case", "policy", "agents", "processes"], Commercial: ["cases", "case", "grid", "policy", "processes"] };
+/* Broker submission is one lending process among several. The others are shown so the audience sees where NashFlow goes next; only broker submission runs in this demo. */
+const PROCESSES = [
+  { id: "broker", name: "Broker submission", status: "Running in this demo", tone: "c-green", what: "A broker emails a deal pack for a commercial property loan. The agents read it, chase anything missing, check it against policy and draft the credit memo. The RM adds their view, the Underwriter decides and Commercial approves pricing.",
+    steps: ["Email in", "Read and extract", "Chase the broker", "Policy and financials", "Credit memo", "RM", "Underwriter", "Pricing and terms"] },
+  { id: "drawdown", name: "Development drawdowns", status: "Next", tone: "c-amber", what: "A quantity surveyor's report arrives for a drawdown on a development loan. The agents check the works against budget and programme, the facility terms and earlier drawdowns, then recommend the amount to release. A person approves.",
+    steps: ["QS report in", "Read and extract", "Budget and programme", "Facility terms", "Recommendation", "Approve and release"] },
+  { id: "review", name: "Annual reviews and covenant monitoring", status: "Possible", tone: "c-grey", what: "Each year, or each quarter, the agents read the latest accounts, rent roll and valuation, retest the covenants and flag cases moving towards a breach, with a draft review for the relationship team.",
+    steps: ["Accounts and rent roll in", "Read and extract", "Covenant tests", "Early warning", "Draft review", "Credit sign-off"] },
+  { id: "renewal", name: "Renewals and refinancing", status: "Possible", tone: "c-grey", what: "Ahead of maturity, the agents pull the case history, refresh the figures and draft a renewal paper, so the RM starts from a memo rather than a blank page.",
+    steps: ["Maturity alert", "Case history", "Refresh figures", "Draft paper", "RM", "Underwriter"] },
+];
+function renderProcesses() {
+  const card = (p) => `<div class="card proc ${p.id === "broker" ? "live" : ""}"><div class="cardhead"><h2>${esc(p.name)}</h2><span class="chip ${p.tone}">${esc(p.status)}</span></div>
+    <p>${esc(p.what)}</p>
+    <ol class="flowline">${p.steps.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>
+    ${p.id === "broker" ? `<div><button class="btn primary small" type="button" data-view="cases">Open broker submission</button></div>` : ""}</div>`;
+  return pageHead("Lending processes", "Lending processes", "NashFlow runs any document-heavy lending process the same way: agents read, check and draft, and a person decides. Each process follows the lender's own policy and steps. Broker submission is the one in this demo.") +
+    `<div class="stack">${PROCESSES.map(card).join("")}</div>`;
+}
 function renderNav() {
   const c = cur();
   const item = (id, label, badge, disabled) => `<button class="nav" type="button" data-view="${id}" ${view === id ? 'aria-current="page"' : ""} ${disabled ? "disabled" : ""}><span>${label}</span>${badge != null ? `<span class="badge">${badge}</span>` : ""}</button>`;
+  $("#procBox").innerHTML = `<button type="button" class="procbtn" data-view="processes" ${view === "processes" ? 'aria-current="page"' : ""}><span class="k">Process</span><b>Broker submission</b><small>${PROCESSES.length - 1} more processes</small></button>`;
   $("#roleBox").innerHTML = `<div class="k">Working as</div><div class="roleseg">${ROLES.map((r) => `<button type="button" data-role="${esc(r)}" aria-pressed="${currentRole === r}">${esc(r)}</button>`).join("")}</div><small>${ROLE_INFO[currentRole]}</small>`;
   const mine = cases.filter((x) => myTurn(x)).length;
   if (currentRole === "Underwriter") {
@@ -259,9 +279,10 @@ function verdict(c) {
 function recBar(c, max) {
   const v = verdict(c); const d = c.decision;
   if (d) return `<div class="recbar"><div class="line"><span>Decision</span><span class="chip ${recChipClass(v.kind)}">${esc(v.label)}</span><span class="note">${esc(v.sub)}, ${dateOf(d.at)}</span></div>${d.rationale ? `<p>${esc(d.rationale.length > 260 ? d.rationale.slice(0, 260) + "..." : d.rationale)}</p>` : ""}${v.differs ? `<p class="note">The agents recommended ${esc(c.rec.label)}. The Underwriter decided differently and gave the reason above.</p>` : ""}</div>`;
-  const r = c.rec; const extra = r.reasons.length - max;
-  return `<div class="recbar"><div class="line"><span>Recommendation</span><span class="chip ${recChipClass(v.kind)}">${esc(v.label)}</span>${v.kind === "more" && stageOf(c) === "returned" ? "" : ""}</div>
-    ${r.reasons.length ? `<div class="label">Why</div><ol>${r.reasons.slice(0, max).map((x) => `<li>${esc(x.text)}</li>`).join("")}</ol>${extra > 0 ? `<div><button class="btn small" type="button" data-tab="policy">See ${extra} more in Policy checks</button></div>` : ""}` : `<p class="note">Within policy on every check, with nothing flagged.</p>`}</div>`;
+  const w = recWhy(c); const shown = w.watch.slice(0, max); const extra = w.watch.length - shown.length;
+  return `<div class="recbar"><div class="line"><span>Recommendation</span><span class="chip ${recChipClass(v.kind)}">${esc(v.label)}</span></div>
+    <p>${esc(w.why)}</p>${w.drivers.length ? `<ul>${w.drivers.map((x) => `<li>${esc(x.text)}</li>`).join("")}</ul>` : ""}
+    ${shown.length ? `<div class="label">To weigh before deciding</div><ul>${shown.map((x) => `<li>${esc(x.text)}</li>`).join("")}</ul>${extra > 0 ? `<div><button class="btn small" type="button" data-tab="policy">See ${extra} more in Policy checks</button></div>` : ""}` : ""}</div>`;
 }
 function tile(k, v, s, tone) { return `<div class="tile ${tone || ""}"><div class="k">${k}</div><div class="v">${v}</div><div class="s">${s || "&nbsp;"}</div></div>`; }
 function renderCaseView(c) {
@@ -283,7 +304,7 @@ function renderCaseView(c) {
   else body = { review: renderReview, memo: renderMemoTab, source: renderSource, fin: (x) => renderFinancials(x) + (currentRole === "Relationship Manager" && x.memo && ["rm", "returned"].includes(stageOf(x)) ? `<div style="margin-top:14px">${renderWhatIf(x)}</div>` : ""), policy: renderPolicyTab, docs: renderDocsTab, comms: renderComms, agents: renderAgentsTab, decision: renderDecision, pricing: renderPricing, audit: renderAudit }[currentTab](c);
   return pageHead("Case management", "Case management") + `
   <div class="casecard">
-    <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${myTurn(c) ? `<span class="chip c-red">Your action</span>` : ""}${c.source && c.source.kind === "email" ? `<span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? `<span class="chip c-red">Broker not replying</span>` : ""}</div>
+    <div class="titleline"><span class="cref">${esc(c.ref)}</span><h2>${esc(c.title)}</h2><span class="chip c-grey">Broker submission</span><span class="chip c-grey">Commercial property investment loan</span><span class="chip c-amber">${esc(c.memo ? STAGES[stageOf(c)] : c.status)}</span>${myTurn(c) ? `<span class="chip c-red">Your action</span>` : ""}${c.source && c.source.kind === "email" ? `<span class="chip c-blue">By email</span>` : ""}${c.chase && c.chase.flagRM ? `<span class="chip c-red">Broker not replying</span>` : ""}</div>
     <div class="subline">${esc(sub)}</div>
     <div class="tiles">${caseTiles(c, { L, T, V, ltv, icr, rb, recTone, toCheck: ready ? toCheckCount(c) : 0, ready })}
     </div>
@@ -871,7 +892,7 @@ function renderReview(c) {
       <ul class="ready"><li class="${n ? "todo" : "ok"}">${n ? `${n} field${n > 1 ? "s" : ""} not checked by the RM` : "Every field checked by the RM"}</li><li class="${m ? "todo" : "ok"}">${m ? `${m} mismatch${m > 1 ? "es" : ""} between documents` : "No mismatches between documents"}</li><li class="${c.rec.exceptions.length ? "todo" : "ok"}">${c.rec.exceptions.length ? "Policy exception: " + esc(c.rec.exceptions.join(", ")) : "No policy exception"}</li></ul>
       <div class="ask"><h3>Is the case ready for you to review?</h3><p class="hint">If something big is missing, send it straight back. Otherwise NashFlow takes you through ${fl.length ? fl.length + " flag" + (fl.length > 1 ? "s" : "") : "the numbers"} next.</p>
         <div class="opts"><button class="btn primary" type="button" data-act="rv-next">Yes, start the review</button><button class="btn" type="button" data-act="rv-return">No, return it to the RM</button></div></div></div>`;
-    side = `<div class="recbar"><div class="line"><span>The agents recommend</span><span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label)}</span></div>${c.rec.reasons.length ? `<ol>${c.rec.reasons.slice(0, 5).map((x) => `<li>${esc(x.text)}</li>`).join("")}</ol>` : `<p class="note">All provisions pass.</p>`}</div>`;
+    side = `<div class="recbar"><div class="line"><span>The agents recommend</span><span class="chip ${recChipClass(c.rec.kind)}">${esc(c.rec.label)}</span></div>${(() => { const w = recWhy(c); const l = w.drivers.concat(w.watch).slice(0, 5); return `<p>${esc(w.why)}</p>${l.length ? `<ul>${l.map((x) => `<li>${esc(x.text)}</li>`).join("")}</ul>` : ""}`; })()}</div>`;
   } else if (R.step === 1) {
     if (!fl.length) main = `<div class="card"><h2>Step 2 of 6: flags</h2><p class="hint">Nothing flagged. The agents found no mismatches, failed checks or concerns in the accounts.</p>${nav("Next: the numbers")}</div>`;
     else {
@@ -1159,7 +1180,7 @@ function render() {
   const c = cur();
   if (!ROLE_VIEWS[currentRole].includes(view)) view = "cases";
   if (view === "case" && !c) view = cases.length || currentRole !== "Relationship Manager" ? "cases" : "new";
-  const html = { new: renderNew, cases: renderCases, inbox: renderInbox, policy: renderPolicyAdmin, agents: renderAgentsAdmin, grid: renderGridPage }[view];
+  const html = { new: renderNew, cases: renderCases, inbox: renderInbox, policy: renderPolicyAdmin, agents: renderAgentsAdmin, grid: renderGridPage, processes: renderProcesses }[view];
   $("#main").innerHTML = view === "case" ? renderCaseView(c) : html();
   hydratePages($("#main"));
 }
