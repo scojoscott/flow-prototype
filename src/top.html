@@ -209,6 +209,27 @@ table.t tr.group td { background: var(--surface); font-weight: 700; font-size: 1
 .rvq h3 { font-size: 14px; font-weight: 700; }
 .ed.short { min-height: 70px; }
 .rmsec { border-left-color: var(--accent); }
+.rmsec.asking { background: var(--accent-soft); border-radius: 0 var(--r) var(--r) 0; padding: 12px 14px 12px 16px; }
+.rmform { display: grid; gap: 4px; }
+.rmform .rvq h3 { text-transform: none; letter-spacing: 0; font-size: 14px; font-weight: 700; color: var(--ink); }
+.rmform .rvq:first-of-type { border-top: 1px solid var(--line); padding-top: 12px; }
+.rmsteps { list-style: none; display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 10px; padding: 0; }
+.rmsteps button { width: 100%; display: flex; gap: 10px; align-items: center; text-align: left; border: 1px solid var(--line); border-radius: var(--r); background: var(--page); padding: 10px 12px; cursor: pointer; font: inherit; color: inherit; }
+.rmsteps .num { flex: none; width: 26px; height: 26px; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; background: var(--bg); border: 1px solid var(--line); }
+.rmsteps b { display: block; font-size: 13.5px; }
+.rmsteps small { display: block; font-size: 11.5px; color: var(--muted); }
+.rmsteps .now { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.rmsteps .now .num { background: var(--accent); border-color: var(--accent); color: #fff; }
+.rmsteps .done .num { background: var(--pass); border-color: var(--pass); color: #fff; }
+@media (max-width: 720px) { .rmsteps { grid-template-columns: 1fr; } }
+.chgbox { display: grid; gap: 8px; margin-top: 8px; padding: 12px; border: 1px solid var(--accent); border-radius: var(--r); background: var(--accent-soft); }
+.chgbox label { font-weight: 700; font-size: 13px; }
+.chgrow { display: flex; gap: 8px; align-items: stretch; }
+.chgrow textarea { flex: 1; }
+.btn.mic[aria-pressed="true"] { background: var(--accent); border-color: var(--accent); color: #fff; }
+.memo-sec.busy .memo-body { opacity: .45; }
+details.comments summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+details.comments[open] { display: grid; gap: 6px; }
 .wigrid { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 10px; }
 .wigrid label { display: grid; gap: 4px; font-size: 12px; font-weight: 700; color: var(--muted); }
 .wigrid input, .wigrid select { width: 100%; min-width: 0; box-sizing: border-box; font: inherit; font-size: 14px; padding: 7px 9px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--bg); }
@@ -388,8 +409,7 @@ textarea.ed { width: 100%; min-height: 150px; border: 1px solid var(--line); bor
     <div class="navgroup" id="navCases"></div>
     <div class="navgroup" id="navAdmin"></div>
     <div class="foot">
-      <div class="prov">AI provider<b id="providerPill">Checking</b></div>
-      <button class="btn small" id="openSettings" type="button">Change AI provider</button>
+      <b id="providerPill" hidden>Checking</b>
     </div>
   </nav>
   <main id="main"></main>
