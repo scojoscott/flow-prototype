@@ -456,7 +456,7 @@ function activeProvider() {
 function renderProviderPill() {
   const p = activeProvider();
   let label = PROVIDERS[p].name;
-  if (p === "gemini") label += settings.geminiKey ? ` (${geminiSessionModel || settings.geminiModel})` : " (add key in Change AI provider)";
+  if (p === "gemini") label += settings.geminiKey ? ` (${geminiSessionModel || settings.geminiModel})` : " (add key in Settings)";
   if (p === "claude-builtin" && !sampleFn && sampleChecked) label += " (not available here)";
   $("#providerPill").textContent = "AI: " + label;
 }
@@ -495,7 +495,7 @@ async function askAI(prompt, images, purpose) {
     }
   }
   if (p === "gemini") {
-    if (!settings.geminiKey) throw new Error("Add your Gemini key in Change AI provider first (free from aistudio.google.com).");
+    if (!settings.geminiKey) throw new Error("Add your Gemini key in Settings first (free from aistudio.google.com).");
     const parts = [{ text: prompt }].concat(images.map((im) => ({ inline_data: { mime_type: im.mime, data: im.b64 } })));
     const call = async (model) => {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
@@ -1331,7 +1331,7 @@ async function runAgents(c, onlyMemo = false) {
         await chFetch(c); stopCheck(c);
         if (c.ch && c.ch.profile) { const n = c.ch.findings.filter((f) => f.tone !== "green").length; set("ch", "done", `${c.ch.profile.company_name} (${c.ch.num}), ${c.ch.profile.company_status}. ${n ? n + " point" + (n > 1 ? "s" : "") + " to check" : "No concerns"}.`); }
         else set("ch", "error", "Not checked: " + ((c.ch && c.ch.error) || "unknown error") + " The case carries on without it.");
-      } else set("ch", "done", "Skipped: no Companies House key. Add one in Change AI provider.");
+      } else set("ch", "done", "Skipped: no Companies House key. Add one in Settings.");
       set("policy", "active");
       computeChecks(c); computeAnalysis(c);
       c.judgements = [];
@@ -1410,7 +1410,7 @@ async function rerunAgent(c, id) {
       audit(c, "Extraction agent", `Rerun on its own: extracted ${found} of ${FIELDS.length} fields`, "agent");
       repolicy();
     } else if (id === "ch") {
-      if (!(typeof chFetch === "function" && settings.chKey)) set("done", "Skipped: no Companies House key. Add one in Change AI provider.");
+      if (!(typeof chFetch === "function" && settings.chKey)) set("done", "Skipped: no Companies House key. Add one in Settings.");
       else {
         await chFetch(c); stopCheck(c);
         if (c.ch && c.ch.profile) { const n = c.ch.findings.filter((f) => f.tone !== "green").length; set("done", `${c.ch.profile.company_name} (${c.ch.num}), ${c.ch.profile.company_status}. ${n ? n + " point" + (n > 1 ? "s" : "") + " to check" : "No concerns"}.`); }
