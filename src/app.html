@@ -796,7 +796,7 @@ ${JUDGEMENT_AREAS.map((j) => `   - ${j.area}: ${j.rule}`).join("\n")}
    - property: location and micro-location, type and specification, age and condition, tenure, EPC and MEES implications, alternative uses, and how liquid the asset is as security.
    - valuation: valuer, date and basis, market value, capital value per sq ft, passing rent against ERV and the reversion, yield (the valuer's if given, otherwise the calculated implied yield), comparables if given and whether the value looks supported, the valuer's view on suitability, and reliance points (age of the valuation, who instructed it, need for a lender-instructed RICS valuation).
    - income: one "- " line per tenant (tenant, rent and share of total, lease end and break, covenant comment from evidence only), then WAULT to expiry and to break, rent at risk from lease events within the loan term, concentration, vacancy, arrears and reversion potential.
-   - financial_analysis: LTV, ICR at the pay rate and under stress, DSCR if amortising, debt yield and the sensitivities, with headroom against policy, and what the accounts show using the FINANCIAL SPREAD (income and profit trend, interest cover from the accounts, gearing, cash, guarantor net worth; mark its ratios as (calculated)). One or two paragraphs, then "- " lines for each red or amber flag with the reason.
+   - financial_analysis (no more than 100 words): one short paragraph on LTV, ICR and DSCR if amortising with their headroom against policy, and one on what the accounts show from the FINANCIAL SPREAD (income and profit trend, gearing, guarantor net worth; mark its ratios as (calculated)). Then at most 3 "- " lines for the red or amber flags. Do not repeat the sensitivities or stress tests: they have their own section.
    - exit: how the loan is repaid at maturity (refinance or sale), whether the asset should be refinanceable then given lease events before maturity and the LTV and ICR at maturity, and what could stop it.
    - risks: 3 to 5 "- Risk: ... Mitigant: ..." lines, most important first, specific to this deal.
    - covenants: the financial covenants from the credit policy, section 7.2 (LTV no more than ${COVENANTS.ltv}%, ICR at least ${COVENANTS.icr}x, DSCR at least ${COVENANTS.dscr}x if amortising; ${POLICY.covTesting}), with the headroom this deal has against each from the SENSITIVITIES, citing the policy as (policy 7.2); then information undertakings (annual accounts, quarterly rent roll, lender's right to revalue).
@@ -1058,6 +1058,16 @@ function stressBreakeven(c) {
   if (b.V) out.push({ label: "Value fall before LTV breaches the covenant", value: pct(Math.max(0, (1 - b.L / (COVENANTS.ltv / 100) / b.V) * 100), 0), note: `Covenant ${COVENANTS.ltv}%.` });
   return out;
 }
+/* Short memo version of the sensitivities and stress tests. The full tables are on the Financials tab. */
+function sensitivityText(c) {
+  const be = stressBreakeven(c); const rows = stressRows(c);
+  if (!be.length) return "Not enough data to calculate. Needs the loan amount and passing rent.";
+  const word = (r) => (r === "green" ? "within policy" : r === "amber" ? "below policy, within covenant" : "breaches the covenant");
+  const sev = rows.find((r) => /^Combined/.test(r.label));
+  const lines = be.map((x) => `- **${x.label.replace(" breaches the covenant", "").replace(" before ", " before ")}:** ${x.value}`);
+  if (sev && sev.icr != null) lines.push(`- **Combined downside (rates +2%, rent -10%, value -15%):** ICR ${times(sev.icr)}, ${word(sev.icrRag)}${sev.ltv != null ? `; LTV ${pct(sev.ltv)}, ${word(sev.ltvRag)}` : ""}`);
+  return `Headroom against the policy covenants (LTV ${COVENANTS.ltv}%, ICR ${COVENANTS.icr}x), calculated in code:\n\n${lines.join("\n")}\n\nThe full sensitivities and stress tests are on the Financials tab.`;
+}
 function stressText(c) {
   const rows = stressRows(c); if (!rows.length) return "";
   const word = (r) => (r === "green" ? "within policy" : r === "amber" ? "below policy, within covenant" : r === "red" ? "breaches covenant" : "");
@@ -1066,6 +1076,20 @@ function stressText(c) {
 }
 
 /* ------------------------------------------------------------------ recommendation (BR-06) and routing (BR-07) */
+/* One sentence on why the agents recommend what they do, then the points that don't change it but the decision maker should weigh. */
+function recWhy(c) {
+  const r = c.rec; const all = c.checks.concat(c.judgements);
+  const drivers = r.reasons.filter((x) => x.driver !== false), watch = r.reasons.filter((x) => x.driver === false);
+  const passed = all.filter((k) => k.outcome === "Pass").length;
+  const val = (id) => { const k = c.checks.find((x) => x.id === id); return k && k.value && k.value !== "-" ? k.value : null; };
+  const key = [val("ltv") && "LTV " + val("ltv"), val("icr") && "ICR " + val("icr")].filter(Boolean).join(", ");
+  let why;
+  if (r.kind === "approve") why = `${passed} of ${all.length} policy checks pass${key ? " (" + key + ")" : ""} and nothing puts the case outside policy or appetite.`;
+  else if (r.kind === "escalate") why = `The case is acceptable apart from ${drivers.length === 1 ? "one point" : drivers.length + " points"} outside policy, so approving it needs a policy exception with a reason.`;
+  else if (r.kind === "more") why = `The pack is not complete enough to decide. ${drivers.length === 1 ? "One item is" : drivers.length + " items are"} needed from the broker first.`;
+  else why = "The case is outside the lender's appetite.";
+  return { why, drivers: r.kind === "approve" ? [] : drivers, watch };
+}
 function computeRecommendation(c) {
   const allChecks = c.checks.concat(c.judgements);
   const reasons = [];
@@ -1077,14 +1101,15 @@ function computeRecommendation(c) {
   const outOfDate = c.checks.filter((k) => k.outOfDate);
   const unclear = c.checks.filter((k) => k.outcome === "Unclear" && !["epc"].includes(k.id));
   const exceptions = allChecks.filter((k) => k.outcome === "Fail" && !k.core && !k.outOfDate);
-  core.forEach((k) => reasons.push({ text: `${k.area}: ${k.why}`, ref: k.id }));
-  exceptions.forEach((k) => reasons.push({ text: `${k.area} outside policy: ${k.value && k.value !== "-" ? k.value + ". " : ""}${k.why || k.explanation || ""}`, ref: k.id }));
-  missing.forEach((f) => reasons.push({ text: `${FIELD[f.key].label} is ${c.fields[f.key].state.toLowerCase()}.${c.fields[f.key].note ? " " + c.fields[f.key].note : ""}`, ref: "field:" + f.key }));
-  outOfDate.forEach((k) => reasons.push({ text: `Out of date: ${k.area.toLowerCase()} (${k.why})`, ref: k.id }));
-  unclear.forEach((k) => { if (!missing.length) reasons.push({ text: `${k.area}: ${k.why}`, ref: k.id }); });
-  c.consistency.forEach((x) => reasons.push({ text: `Inconsistent: ${x.text}`, ref: "field:" + x.key }));
-  allChecks.filter((k) => k.flag === "amber" && k.outcome === "Pass").forEach((k) => reasons.push({ text: `Watch: ${k.area}, ${k.why}`, ref: k.id }));
-  c.judgements.filter((k) => k.outcome === "Unclear").forEach((k) => reasons.push({ text: `To review: ${k.area}, ${k.explanation}`, ref: k.id }));
+  const D = (text, ref) => reasons.push({ text, ref, driver: true }), W = (text, ref) => reasons.push({ text, ref, driver: false });
+  core.forEach((k) => D(`${k.area}: ${k.why}`, k.id));
+  exceptions.forEach((k) => D(`${k.area} is outside policy${k.value && k.value !== "-" ? " at " + k.value : ""}. ${k.why || k.explanation || ""}`, k.id));
+  missing.forEach((f) => D(`${FIELD[f.key].label} is ${c.fields[f.key].state.toLowerCase()}.${c.fields[f.key].note ? " " + c.fields[f.key].note : ""}`, "field:" + f.key));
+  outOfDate.forEach((k) => D(`The ${k.area.toLowerCase()} is out of date (${k.why})`, k.id));
+  unclear.forEach((k) => { if (!missing.length) D(`${k.area}: ${k.why}`, k.id); });
+  c.consistency.forEach((x) => W(`Documents disagree. ${x.text}`, "field:" + x.key));
+  allChecks.filter((k) => k.flag === "amber" && k.outcome === "Pass").forEach((k) => W(`${k.area} passes but is close to the limit${k.value && k.value !== "-" ? " at " + k.value : ""}`, k.id));
+  c.judgements.filter((k) => k.outcome === "Unclear").forEach((k) => W(`${k.area} needs a view: ${k.explanation}`, k.id));
 
   let kind, label;
   if (core.length) { kind = "decline"; label = "Decline: outside appetite"; }
@@ -1114,12 +1139,13 @@ function systemSections(c) {
   const pol = `${passed.length} of ${all.length} provisions pass${passed.length ? ": " + passed.map((k) => k.area).join(", ") : ""}.`
     + (issues.length ? "\n\nTo note:\n\n" + issues.map((k) => `- **${k.area}** (${k.clause}): ${k.outcome}${k.flag === "amber" && k.outcome === "Pass" ? ", close to the limit" : ""}. ${k.type === "Calculated" ? k.why : k.explanation}${k.source && k.source.doc ? ` [${k.source.doc} p${k.source.page || 1}]` : ""}`).join("\n") : "\n\nNothing outside policy or close to a limit.")
     + "\n\nThe full list of checks is on the Policy checks tab.";
-  const rec = `Recommendation: ${c.rec.label}.\n\nWhy, most important first:\n\n` + (c.rec.reasons.length ? c.rec.reasons.map((r) => "- " + r.text).join("\n") : "- All provisions pass and no material issues were found.");
+  const w = recWhy(c);
+  const rec = `**Recommendation: ${c.rec.label}.** ${w.why}` + (w.drivers.length ? "\n\n" + w.drivers.map((r) => "- " + r.text).join("\n") : "") + (w.watch.length ? "\n\n**To weigh before deciding:**\n\n" + w.watch.map((r) => "- " + r.text).join("\n") : "");
   return {
     external: (typeof chText === "function" && chText(c)) || "Companies House, Land Registry and credit bureau checks are not connected in this prototype. In the product, Companies House is checked live and Land Registry and bureau results are mocked for the MVP.",
     policy: `Assessed against the ${POLICY.name} (${POLICY.version}). Numeric limits are calculated, not judged by the AI. ${pol}`,
     recommendation: rec,
-    sensitivity: "Calculated in code from the extracted figures. Covenant levels come from the credit policy, section 7.2 Standard financial covenants: LTV no more than " + COVENANTS.ltv + "%, ICR at least " + COVENANTS.icr + "x, DSCR at least " + COVENANTS.dscr + "x if amortising. " + POLICY.covTesting + ".\n\n" + ((c.analysis || []).map((a) => `- **${a.label}:** ${a.value}${a.note ? ". " + a.note : ""}`).join("\n") || "- Not enough data to calculate.") + stressText(c),
+    sensitivity: sensitivityText(c),
   };
 }
 function refreshSystemSections(c) {
