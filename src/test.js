@@ -355,6 +355,7 @@ const conditions = { conditions: [
     }
     else if (p.action === "get") body = { ok: true, message: gas.all.find((x) => x.id === p.id) };
     else if (p.action === "send") body = p.threadId === "t1" && p.body ? { ok: true } : { error: "bad send" };
+    else if (p.action === "trash") body = p.threadId === "tg" ? { ok: true } : { error: "Unknown action." };
     await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
   });
   await page.click('.rolebox button[data-role="Relationship Manager"]');
@@ -384,6 +385,19 @@ const conditions = { conditions: [
   await page.screenshot({ path: OUT + "/8b-inbox-thread.png", fullPage: true });
   console.log("Flag RM:", await page.evaluate(() => cases.find((x) => x.source).chase.flagRM), "GAS calls:", gas.calls.join(","));
   await page.screenshot({ path: OUT + "/9-chase.png", fullPage: true });
+  // delete emails from the inbox
+  const thr0 = await page.locator(".thr").count();
+  const igId = await page.evaluate(() => "ig:" + inboxState.ignored.find((x) => x.threadId === "tg").id);
+  await page.click(`.thr[data-id="${igId}"]`);
+  await page.click('button[data-act="inbox-del"]'); await page.click('button[data-act="inbox-del"]');
+  await page.waitForTimeout(300);
+  const caseId = await page.evaluate(() => cases.find((x) => x.source).id);
+  await page.click(`.thr[data-id="${caseId}"]`);
+  await page.click('button[data-act="inbox-del"]'); await page.click('button[data-act="inbox-del"]');
+  await page.waitForTimeout(300);
+  const del = await page.evaluate(() => ({ thr: document.querySelectorAll(".thr").length, cases: cases.filter((x) => x.source).length, view }));
+  console.log("Inbox delete:", thr0, "->", del.thr, "threads; email cases left:", del.cases, "; trash calls:", gas.calls.filter((x) => x === "trash").length);
+  if (del.thr !== thr0 - 2 || del.cases !== 0 || del.view !== "inbox") throw new Error("inbox delete failed");
   // stop and delete
   await page.click('button[data-view="new"]');
   await page.evaluate(() => { window.__slow = true; });

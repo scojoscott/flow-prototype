@@ -67,7 +67,7 @@ function renderProcesses() {
 function renderNav() {
   const c = cur();
   const item = (id, label, badge, disabled) => `<button class="nav" type="button" data-view="${id}" ${view === id ? 'aria-current="page"' : ""} ${disabled ? "disabled" : ""}><span>${label}</span>${badge != null ? `<span class="badge">${badge}</span>` : ""}</button>`;
-  $("#procBox").innerHTML = `<button type="button" class="procbtn" data-view="processes" ${view === "processes" ? 'aria-current="page"' : ""}><span class="k">Process</span><b>Broker submission</b><small>${PROCESSES.length - 1} more processes</small></button>`;
+  $("#procBox").innerHTML = `<button type="button" class="procbtn" data-view="processes" ${view === "processes" ? 'aria-current="page"' : ""}><span class="k">Process</span><b>Broker submission</b></button>`;
   $("#roleBox").innerHTML = `<div class="k">Working as</div><div class="roleseg">${ROLES.map((r) => `<button type="button" data-role="${esc(r)}" aria-pressed="${currentRole === r}">${esc(r)}</button>`).join("")}</div><small>${ROLE_INFO[currentRole]}</small>`;
   const mine = cases.filter((x) => myTurn(x)).length;
   if (currentRole === "Underwriter") {
@@ -1334,7 +1334,7 @@ async function pollInbox(manual) {
         const t = await triageEmail(m);
         if (!t.deal) {
           ignoredMsgs[m.id] = m;
-          inboxState.ignored = [{ id: m.id, at: nowISO(), from: m.from, subject: m.subject, reason: t.reason }].concat(inboxState.ignored || []).slice(0, 20);
+          inboxState.ignored = [{ id: m.id, threadId: m.threadId, at: nowISO(), from: m.from, subject: m.subject, reason: t.reason }].concat(inboxState.ignored || []).slice(0, 20);
           inboxLog(`Ignored, not a deal: ${brokerName(m.from)}, "${m.subject}" (${t.reason})`);
           continue;
         }
@@ -1425,6 +1425,21 @@ function threadStatus(th) {
   if (!c.memo) return `<span class="chip c-amber">Agents reading</span>`;
   return `<span class="chip c-blue">${esc(STAGES[stageOf(c)] || c.status)}</span>`;
 }
+/* Delete an email thread: moves it to the bin in the demo Gmail inbox (script version 3) and removes it, and any case opened from it, here. */
+async function deleteInboxThread(id) {
+  const th = inboxThreads().find((x) => x.id === id); if (!th) return;
+  const m = th.ig ? ignoredMsgs[th.ig.id] : null;
+  const threadId = th.c ? th.c.source.threadId : (th.ig.threadId || (m && m.threadId));
+  let note = "";
+  if (threadId && settings.inboxUrl && settings.inboxKey) {
+    try { await inboxCall("trash", { threadId }); }
+    catch (e) { note = /Unknown action/i.test(e.message) ? " It is still in the Gmail inbox: update the inbox script to the latest version to delete it there too." : " Gmail: " + e.message; }
+  }
+  if (th.c) { inboxLog(`Deleted email thread and case ${th.c.ref}`); deleteCase(th.c); view = "inbox"; }
+  else { delete ignoredMsgs[th.ig.id]; inboxState.ignored = (inboxState.ignored || []).filter((x) => x.id !== th.ig.id); inboxLog(`Deleted email from ${brokerName(th.from)}`); }
+  store("nashflow.inbox.state", inboxState);
+  inboxSel = null; render(); toast("Email deleted." + note);
+}
 function renderInbox() {
   const threads = inboxThreads();
   if (!threads.some((x) => x.id === inboxSel)) inboxSel = threads[0] ? threads[0].id : null;
@@ -1433,7 +1448,7 @@ function renderInbox() {
     : `<p class="hint">No deal emails yet. When a broker emails ${esc(shownInbox())}, the thread appears here and the intake agent opens a case.</p>`;
   const view = sel ? `<div class="card"><div class="cardhead"><h2>${esc(sel.subject || "(no subject)")}</h2>${threadStatus(sel)}</div>
       ${sel.ig ? `<p class="hint">The intake agent decided this is not a deal: ${esc(sel.ig.reason || "")}</p>` : `<p class="hint">Case ${esc(sel.c.ref)}, ${esc(sel.c.title)}.${sel.c.chase && sel.c.chase.awaiting ? " NashFlow has asked the broker for missing information and is waiting for a reply." : ""}</p>`}
-      <div class="row">${sel.c ? `<button class="btn primary small" type="button" data-case="${sel.c.id}">Open case</button><button class="btn small" type="button" data-case="${sel.c.id}" data-opentab="comms">See follow-ups</button>` : ignoredMsgs[sel.ig.id] ? `<button class="btn primary small" type="button" data-act="inbox-open" data-id="${esc(sel.ig.id)}">Open as a case</button>` : ""}</div>
+      <div class="row">${sel.c ? `<button class="btn primary small" type="button" data-case="${sel.c.id}">Open case</button><button class="btn small" type="button" data-case="${sel.c.id}" data-opentab="comms">See follow-ups</button>` : ignoredMsgs[sel.ig.id] ? `<button class="btn primary small" type="button" data-act="inbox-open" data-id="${esc(sel.ig.id)}">Open as a case</button>` : ""}<span class="grow"></span><button class="btn small danger" type="button" data-act="inbox-del" data-id="${esc(sel.id)}" title="${sel.c ? "Deletes the email thread and its case " + esc(sel.c.ref) : "Deletes the email"}">${sel.c ? "Delete email and case" : "Delete email"}</button></div>
       <div class="mails">${sel.msgs.map((m) => `<article class="mail ${m.dir === "out" ? "out" : ""}"><header><b>${esc(m.dir === "out" ? "NashFlow, for the lending team" : brokerName(m.from))}</b><span class="note">${dateOf(m.at)} ${timeOf(m.at)}</span>${m.dir === "out" ? `<span class="chip c-grey">${esc(m.kind === "Reminder" ? "Automatic reminder" : "Sent by NashFlow")}</span>` : ""}</header>
         <div class="note">To: ${esc(m.dir === "out" ? brokerName(m.to) : shownInbox())}</div>
         <div class="mailbody">${esc(m.body || "").trim() || '<span class="note">(No message text)</span>'}</div>
@@ -1515,6 +1530,10 @@ document.addEventListener("click", async (e) => {
     else if (a === "inbox-copy") copyText(INBOX_SCRIPT, "Script copied");
     else if (a === "inbox-settings") { inboxSettingsOpen = !inboxSettingsOpen; render(); }
     else if (a === "inbox-sel") { inboxSel = t.dataset.id; render(); }
+    else if (a === "inbox-del") {
+      if (t.dataset.confirm !== "1") { t.dataset.confirm = "1"; t.textContent = "Click again to delete"; return; }
+      await deleteInboxThread(t.dataset.id);
+    }
     else if (a === "inbox-open") { const m = ignoredMsgs[t.dataset.id]; if (m) { delete ignoredMsgs[m.id]; inboxState.ignored = (inboxState.ignored || []).filter((x) => x.id !== m.id); store("nashflow.inbox.state", inboxState); await openEmailAsCase(m); } }
     return;
   }

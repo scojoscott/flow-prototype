@@ -8,6 +8,7 @@
  *   get   : returns one email with its attachments
  *   done  : labels the email "NashFlow picked up" in Gmail (it still shows for other browsers)
  *   send  : replies to the broker in the same email thread (or sends a new email)
+ *   trash : moves an email thread to the bin (used by Delete email in NashFlow)
  *   ping  : checks the connection
  *
  * Set up (about 10 minutes)
@@ -35,10 +36,11 @@ function handle_(p) {
   if (!p.key || p.key !== KEY) return out_({ error: "The key does not match the one in the script." });
   try {
     if (p.action === "ping") return out_({ ok: true, inbox: Session.getEffectiveUser().getEmail() });
-    if (p.action === "list") return out_({ ok: true, version: 2, messages: listAll_() });
+    if (p.action === "list") return out_({ ok: true, version: 3, messages: listAll_() });
     if (p.action === "get") return out_({ ok: true, message: getOne_(p.id) });
     if (p.action === "done") { markDone_(p.id); return out_({ ok: true }); }
     if (p.action === "send") return out_(send_(p));
+    if (p.action === "trash") { const t = p.threadId && GmailApp.getThreadById(p.threadId); if (!t) return out_({ error: "Email thread not found." }); t.moveToTrash(); return out_({ ok: true }); }
     return out_({ error: "Unknown action." });
   } catch (err) {
     return out_({ error: String(err && err.message ? err.message : err) });
