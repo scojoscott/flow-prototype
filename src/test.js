@@ -185,10 +185,8 @@ const conditions = { conditions: [
   // the RM's own view
   await page.click('button[data-act="submit-uw"]');
   console.log("Blocked without view, now on:", await page.evaluate(() => currentTab));
-  await page.click('button[data-act="rmv-choice"][data-key="sponsor"][data-choice="Met them"]');
-  await page.fill('textarea[data-rmv="sponsor"]', "Known to us for 8 years through two previous loans, both repaid early. Patrick runs the portfolio day to day.");
-  await page.fill('textarea[data-rmv="story"]', "Refinance away from a high street bank that is exiting secondary retail. Exit by refinance or sale of the parade once Unit 7 is let.");
-  for (const el of await page.locator("textarea[data-rmq]").all()) await el.fill("Discussed with the broker on 4 Nov: covered in the conditions.");
+  console.log("RM inputs:", await page.locator("#rmsec textarea").count());
+  await page.fill('textarea[data-rmv="view"]', "Known to us for 8 years through two previous loans, both repaid early; met Patrick last week. Refinance away from a high street bank that is exiting secondary retail. Exit by refinance or sale of the parade once Unit 7 is let. Rent figure checked with the broker: £158,000 is right.");
   await page.click('button[data-act="rmv-rec"][data-choice="Support with conditions"]');
   console.log("View missing:", await page.evaluate(() => rmViewMissing(cur()).join(", ") || "none"));
   await page.locator("#rmsec").screenshot({ path: OUT + "/5w-rm-view.png" });
@@ -279,7 +277,7 @@ const conditions = { conditions: [
   await page.waitForFunction(() => cur().run && !cur().run.running, null, { timeout: 20000 });
   console.log("CH agent step:", await page.evaluate(() => { const st = cur().run.steps.find((x) => x.id === "ch"); const k = cur().checks.find((x) => x.id === "ch"); return st.state + " | " + st.detail + " | check: " + (k ? k.outcome + "/" + k.flag : "none"); }));
   await page.click('button[data-tab="memo"]');
-  await page.evaluate(() => { const v = rmView(cur()); v.a.sponsor = "Known sponsor."; v.a.story = "Refinance."; creditQuestions(cur()).forEach((q) => (v.qa[q.key] = "Answered.")); v.rec = "Support"; save(); render(); });
+  await page.evaluate(() => { const v = rmView(cur()); v.a.view = "Known sponsor. Refinance."; v.rec = "Support"; save(); render(); });
   await page.click('button[data-act="submit-uw"]');
   await page.click('.rolebox button[data-role="Underwriter"]');
   await page.click('button[data-view="cases"]');
