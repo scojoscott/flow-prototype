@@ -92,7 +92,7 @@ const conditions = { conditions: [
   page.on("pageerror", (e) => errors.push(e.message));
   page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
   let prompts = [];
-  await page.exposeFunction("__mockAI", (purpose, prompt) => (purpose === "triage" ? { is_deal: /Refinance|Re:/.test(prompt), reason: /Refinance|Re:/.test(prompt) ? "Broker refinance request" : "Not a loan request" } : purpose === "extract" ? extraction : purpose === "conditions" ? conditions : purpose === "financials" ? financials : purpose === "edit" ? { text: "Redmere Estates Ltd, company 11456209 [D1 p1]. The RM confirms the directors are now Joanne Redmond and Alan Shaw. Rental income fell from £183,900 to £171,200 [D2 p1].", summary: "Directors updated" } : memo));
+  await page.exposeFunction("__mockAI", (purpose, prompt) => (purpose === "policy" ? { policy_name: "Commercial Property Lending Credit Policy", version: "2.0", rules: { maxLoan: { value: 7500000, clause: "2.1", page: 1, quote: "not more than £7,500,000" }, maxLTV: { value: "65%", clause: "3.1", page: 1, quote: "must not exceed 65%" }, minICR: { value: 1.75, clause: "4.1", quote: "at least 1.75 times" }, minEPC: { value: "C", clause: "6.2", quote: "EPC rating of C or better" }, minDSCR: { value: null } } } : purpose === "triage" ? { is_deal: /Refinance|Re:/.test(prompt), reason: /Refinance|Re:/.test(prompt) ? "Broker refinance request" : "Not a loan request" } : purpose === "extract" ? extraction : purpose === "conditions" ? conditions : purpose === "financials" ? financials : purpose === "edit" ? { text: "Redmere Estates Ltd, company 11456209 [D1 p1]. The RM confirms the directors are now Joanne Redmond and Alan Shaw. Rental income fell from £183,900 to £171,200 [D2 p1].", summary: "Directors updated" } : memo));
   await page.exposeFunction("__logPrompt", (p) => { prompts.push(p); });
   await page.addInitScript(() => { window.__testAI = async (prompt, images, purpose) => { await window.__logPrompt(prompt.slice(0, 200000)); await new Promise((r) => setTimeout(r, 400)); return window.__mockAI(purpose, prompt); }; });
   await page.goto("file://" + path.join(__dirname, "../index.html"));
@@ -402,6 +402,27 @@ const conditions = { conditions: [
   const del = await page.evaluate(() => ({ thr: document.querySelectorAll(".thr").length, cases: cases.filter((x) => x.source).length, view }));
   console.log("Inbox delete:", thr0, "->", del.thr, "threads; email cases left:", del.cases, "; trash calls:", gas.calls.filter((x) => x === "trash").length);
   if (del.thr !== thr0 - 2 || del.cases !== 0 || del.view !== "inbox") throw new Error("inbox delete failed");
+  // new credit policy
+  const icr0 = await page.evaluate(() => { const c = cases.find((x) => x.checks && !(x.decision && x.decision.choice)); return c ? c.id : null; });
+  await page.click('button[data-view="policy"]');
+  await page.click('button[data-act="pol-upload"]').catch(() => {});
+  await page.locator("#policyFile").setInputFiles({ name: "Policy v2.txt", mimeType: "text/plain", buffer: Buffer.from("Loans not more than £7,500,000. LTV must not exceed 65%. ICR at least 1.75 times. EPC C or better.") });
+  await page.waitForSelector('button[data-act="pol-publish"]', { timeout: 10000 });
+  await page.screenshot({ path: OUT + "/9-policy-review.png", fullPage: true });
+  await page.fill('input[data-polv="minICR"]', "1.8");
+  await page.click('button[data-act="pol-publish"]');
+  await page.waitForTimeout(300);
+  const pol = await page.evaluate((id) => { const c = cases.find((x) => x.id === id); return { name: POLICY.name, icr: POLICY.minICR, ltv: POLICY.maxLTV, epc: POLICY.minEPC, maxLoan: POLICY.maxLoan, stored: JSON.parse(localStorage.getItem("nashflow.policy")).active.values.minICR, rule: c ? c.checks.find((k) => k.id === "icr").rule : null, cov: COVENANTS.ltv }; }, icr0);
+  pol.rule2 = await page.evaluate(() => { const c = cases.find((x) => x.checks); if (!c) return null; const keep = c.checks; computeChecks(c); const r = c.checks.find((k) => k.id === "icr").rule; c.checks = keep; return r; });
+  console.log("Policy:", JSON.stringify(pol));
+  if (pol.rule2 !== "At least 1.8x") throw new Error("checks not using new policy");
+  if (pol.icr !== 1.8 || pol.ltv !== 65 || pol.epc !== "C" || pol.maxLoan !== 7500000 || (icr0 && pol.rule !== "At least 1.8x")) throw new Error("policy publish failed");
+  await page.screenshot({ path: OUT + "/9-policy-published.png", fullPage: true });
+  await page.click('button[data-act="pol-reset"]');
+  if (await page.evaluate(() => POLICY.minICR) !== 1.5) throw new Error("policy reset failed");
+  await page.click('button[data-view="usage"]');
+  await page.screenshot({ path: OUT + "/10-usage.png", fullPage: true });
+  console.log("Usage page:", await page.evaluate(() => document.querySelector(".pagehead h1").textContent));
   // stop and delete
   await page.click('button[data-view="new"]');
   await page.evaluate(() => { window.__slow = true; });
