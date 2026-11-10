@@ -795,7 +795,33 @@ function chText(c) {
     + (h.psc.length ? `\n\nPersons with significant control: ${h.psc.map((x) => x.name).join("; ")}.` : "")
     + "\n\nLand Registry and credit bureau checks are not connected in this prototype.";
 }
-function chCard(c) {
+/* Look up any company at Companies House, without changing the case: for showing a live record in a demo */
+let chAny = { num: "", busy: false, r: null, err: "" };
+async function chLookupAny(num) {
+  num = String(num || "").replace(/\s/g, "").toUpperCase(); if (/^\d{6,7}$/.test(num)) num = num.padStart(8, "0");
+  chAny = { num, busy: true, r: null, err: "" }; render();
+  try {
+    if (!/^[A-Z0-9]{8}$/.test(num)) throw new Error("Enter an 8-character company number, for example 07145051.");
+    const prof = await chGet("/company/" + num); if (!prof) throw new Error(`Company ${num} not found at Companies House.`);
+    const [off, chg] = await Promise.all([chGet(`/company/${num}/officers?items_per_page=50`).catch(() => null), chGet(`/company/${num}/charges`).catch(() => null)]);
+    chAny.r = { prof, officers: ((off && off.items) || []).filter((o) => !o.resigned_on), charges: ((chg && chg.items) || []).filter((x) => x.status === "outstanding").length };
+  } catch (e) { chAny.err = e.message || String(e); }
+  chAny.busy = false; render();
+}
+function chAnyHtml() {
+  const r = chAny.r; let out = "";
+  if (chAny.busy) out = `<p class="hint">Checking Companies House...</p>`;
+  else if (chAny.err) out = `<div class="errbox">${esc(chAny.err)}</div>`;
+  else if (r) { const p = r.prof, a = p.registered_office_address || {}; const dirs = r.officers.filter((o) => o.officer_role === "director");
+    out = `<p><b>${esc(p.company_name)}</b> · ${esc(chAny.num)} · <span class="chip ${p.company_status === "active" ? "c-green" : "c-red"}">${esc(p.company_status)}</span> · incorporated ${p.date_of_creation ? dateOf(p.date_of_creation) : "-"}<br><span class="note">${esc([a.address_line_1, a.address_line_2, a.locality, a.postal_code].filter(Boolean).join(", "))}</span></p>
+      <p class="note">${dirs.length} current director${dirs.length === 1 ? "" : "s"}${dirs.length ? ": " + esc(dirs.slice(0, 6).map((o) => o.name).join("; ")) + (dirs.length > 6 ? " and others" : "") : ""}. ${r.charges} outstanding charge${r.charges === 1 ? "" : "s"}.${p.accounts && p.accounts.overdue ? " Accounts overdue." : ""}${p.has_insolvency_history ? " Has insolvency history." : ""}</p>
+      <p><a href="https://find-and-update.company-information.service.gov.uk/company/${esc(chAny.num)}" target="_blank" rel="noopener">Open on Companies House</a></p>`; }
+  return `<details class="chany" ${chAny.num ? "open" : ""}><summary class="note">Look up any company</summary>
+    <div class="row"><input id="chAnyNum" type="text" placeholder="Company number" value="${esc(chAny.num)}" style="max-width:180px"><button class="btn small" type="button" data-act="ch-any">Look up</button></div>${out}
+    <p class="note">For reference only. It does not change this case.</p></details>`;
+}
+function chCard(c) { const h0 = chCardBase(c); return settings.chKey ? h0.replace(/<\/div>$/, chAnyHtml() + "</div>") : h0; }
+function chCardBase(c) {
   const h = c.ch;
   const btn = `<button class="btn small" type="button" data-act="ch-run">${h && h.profile ? "Check again" : "Check Companies House"}</button>`;
   if (!settings.chKey) return `<div class="card"><div class="cardhead"><h2>Companies House</h2><span class="chip c-grey">Not connected</span></div><p class="hint">Add a Companies House key in Settings to check the borrower live.</p></div>`;
@@ -1542,6 +1568,7 @@ document.addEventListener("click", async (e) => {
   const c = cur(); if (!c) return;
   const act = t.dataset.act;
   if (act === "rerun") { runAgents(c); }
+  else if (act === "ch-any") { chLookupAny(($("#chAnyNum") || {}).value); }
   else if (act === "rerun-one") { rerunAgent(c, t.dataset.step); }
   else if (act === "redraft") { runAgents(c, true); }
   else if (act === "stop-run") { if (c.run && c.run.running) { c.run.cancel = "Stopped by " + actor() + "."; t.disabled = true; t.textContent = "Stopping after the current step"; audit(c, actor(), "Stopped the agents"); } }

@@ -168,6 +168,12 @@ const conditions = { conditions: [
   console.log("Companies House:", await page.evaluate(() => cur().ch.error || cur().ch.findings.map((f) => f.tone + ": " + f.text).join(" | ")));
   console.log("Memo external:", await page.evaluate(() => cur().memo.external.text.slice(0, 90)));
   await page.screenshot({ path: OUT + "/4b-companies-house.png", fullPage: true });
+  await page.click(".chany summary");
+  await page.fill("#chAnyNum", "07145051");
+  await page.click('button[data-act="ch-any"]');
+  await page.waitForFunction(() => !chAny.busy && (chAny.r || chAny.err), null, { timeout: 10000 });
+  console.log("CH any:", await page.evaluate(() => chAny.err || chAny.r.prof.company_name + " " + chAny.num), "| case unchanged:", await page.evaluate(() => cur().ch.num));
+  await page.locator(".chany").screenshot({ path: OUT + "/4b2-ch-any.png" });
   // rerun a single agent from Agents at work
   await page.click('button[data-tab="agents"]');
   const memoAt = await page.evaluate(() => cur().memo.summary && cur().memo.summary.at);
