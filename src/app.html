@@ -347,7 +347,7 @@ const POLICY = {
   version: "Flow doc v0.6, section 7.1",
   minLoan: 250000, maxLoan: 10000000, minTerm: 3, maxTermIO: 15, maxTermAmort: 25,
   maxLTV: 70, maxLTVSingle: 65, minICR: 1.5, stressRate: 6.5, minDSCR: 1.25,
-  minWAULT: 3, concentration: 50, accountsMonths: 12, uwLimit: 1000000,
+  minWAULT: 3, concentration: 50, accountsMonths: 12, uwLimit: 1000000, minEPC: "E",
   /* 7.2 Standard financial covenants: ongoing tests in the facility agreement, with headroom over the day-one limits */
   /* 7.3 Pricing grid (illustrative): margin over the reference rate by LTV band, adjusted for risk grade and risk features */
   pricing: {
@@ -359,6 +359,61 @@ const POLICY = {
   },
   covLTV: 75, covICR: 1.35, covDSCR: 1.15, covTesting: "LTV annually on a lender-instructed valuation; ICR and DSCR quarterly on a 12-month rolling basis",
 };
+/* A lender can publish its own credit policy (Credit policies page). The policy agent reads the document and proposes
+   the value of each rule below with the clause and exact words; a person checks them and publishes. The calculated
+   checks then use the published values. Saved in this browser. */
+const POLICY_DEFAULT = JSON.parse(JSON.stringify(POLICY));
+const POLICY_RULES = [
+  { key: "minLoan", label: "Minimum loan", unit: "money", meaning: "smallest loan the lender will make, in pounds" },
+  { key: "maxLoan", label: "Maximum loan", unit: "money", meaning: "largest loan the lender will make, in pounds (above this is outside appetite)" },
+  { key: "minTerm", label: "Minimum term", unit: "years", meaning: "shortest loan term in years" },
+  { key: "maxTermIO", label: "Maximum term, interest only", unit: "years", meaning: "longest term in years for an interest-only loan" },
+  { key: "maxTermAmort", label: "Maximum term, capital repayment", unit: "years", meaning: "longest term in years for an amortising (capital repayment) loan" },
+  { key: "maxLTV", label: "Maximum LTV", unit: "pct", meaning: "maximum loan to value, percent, for standard multi-let property" },
+  { key: "maxLTVSingle", label: "Maximum LTV, single-let or specialist", unit: "pct", meaning: "maximum loan to value, percent, for single-let or specialist property" },
+  { key: "minICR", label: "Minimum interest cover (ICR)", unit: "x", meaning: "minimum interest cover ratio, times (e.g. 1.5)" },
+  { key: "stressRate", label: "ICR stress rate", unit: "pct", meaning: "stressed interest rate in percent used for the ICR test" },
+  { key: "minDSCR", label: "Minimum debt service cover (DSCR)", unit: "x", meaning: "minimum debt service cover ratio for amortising loans, times" },
+  { key: "minWAULT", label: "Minimum WAULT", unit: "years", meaning: "minimum weighted average unexpired lease term, years" },
+  { key: "concentration", label: "Tenant concentration flag", unit: "pct", meaning: "percent of rent from one tenant above which concentration is flagged" },
+  { key: "accountsMonths", label: "Maximum age of accounts", unit: "months", meaning: "how many months old the latest accounts year end can be" },
+  { key: "minEPC", label: "Minimum EPC rating", unit: "grade", meaning: "lowest acceptable EPC rating, one letter A to G" },
+  { key: "covLTV", label: "LTV covenant", unit: "pct", meaning: "ongoing LTV covenant in the facility agreement, percent" },
+  { key: "covICR", label: "ICR covenant", unit: "x", meaning: "ongoing ICR covenant in the facility agreement, times" },
+  { key: "covDSCR", label: "DSCR covenant", unit: "x", meaning: "ongoing DSCR covenant in the facility agreement, times" },
+];
+function policyValueText(r, v) {
+  if (v == null || v === "") return "-";
+  return r.unit === "money" ? money(v) : r.unit === "pct" ? v + "%" : r.unit === "x" ? v + "x" : r.unit === "years" ? v + " years" : r.unit === "months" ? v + " months" : String(v);
+}
+function cleanPolicyValue(r, v) {
+  if (v == null || v === "") return null;
+  if (r.unit === "grade") { const m = String(v).toUpperCase().match(/[A-G]/); return m ? m[0] : null; }
+  const n = parseFloat(String(v).replace(/[£,%x\s]/gi, "").replace(/m$/i, "e6").replace(/k$/i, "e3"));
+  return isFinite(n) && n > 0 ? n : null;
+}
+let policyStore = load("nashflow.policy", { active: null, history: [] });
+function applyPolicy(active) {
+  POLICY_RULES.forEach((r) => { POLICY[r.key] = POLICY_DEFAULT[r.key]; });
+  POLICY.name = POLICY_DEFAULT.name; POLICY.version = POLICY_DEFAULT.version;
+  if (active) { POLICY_RULES.forEach((r) => { if (active.values[r.key] != null) POLICY[r.key] = active.values[r.key]; }); POLICY.name = active.name || POLICY.name; POLICY.version = active.version || "Published " + new Date(active.at).toLocaleDateString("en-GB"); }
+  try { Object.assign(COVENANTS, { ltv: POLICY.covLTV, icr: POLICY.covICR, dscr: POLICY.covDSCR }); } catch (e) { /* COVENANTS is set from POLICY when it is declared */ }
+}
+applyPolicy(policyStore.active);
+function policyPrompt(doc) {
+  return `You are the policy agent for a UK commercial property lender. Read the lender's credit policy below and find the value it sets for each rule in this list.
+
+${POLICY_RULES.map((r) => `- ${r.key}: ${r.meaning}`).join("\n")}
+
+Reply with JSON only, in this shape:
+{"policy_name": "the policy's title", "version": "its version or date if stated", "rules": {"maxLTV": {"value": 65, "clause": "4.2", "page": 3, "quote": "exact words from the policy"}}}
+
+Use a plain number for value (no £, % or x; 7500000 not 7.5m). For minEPC use one letter. Give the clause number if there is one. Quote the exact words that set the value. If the policy does not set a rule, give {"value": null}. Do not guess.
+
+CREDIT POLICY: ${doc.name}
+${doc.pages.map((t, i) => `[Page ${i + 1}]\n${t}`).join("\n\n")}`;
+}
+
 const JUDGEMENT_AREAS = [
   { area: "Property type", clause: "7.1 Property type", rule: "Retail, office, industrial and mixed use. Specialist uses (for example petrol stations, hotels) by exception." },
   { area: "Borrower", clause: "7.1 Borrower", rule: "UK limited company or SPV, with personal guarantees from principal directors." },
@@ -890,15 +945,16 @@ function computeChecks(c) {
   const missing = (names) => `Cannot calculate: ${names} not available.`;
 
   // Loan size
-  if (L == null) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: "-", outcome: "Unclear", why: missing("loan amount") });
-  else if (L > P.maxLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Above the £10m cap, so outside appetite.` });
-  else if (L < P.minLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Below the £250,000 minimum.` });
-  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: "Within the lending range." });
+  const sizeRule = `${money(P.minLoan)} to ${money(P.maxLoan)}`;
+  if (L == null) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: sizeRule, value: "-", outcome: "Unclear", why: missing("loan amount") });
+  else if (L > P.maxLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: sizeRule, value: money(L), outcome: "Fail", flag: "red", core: true, why: `Above the ${money(P.maxLoan)} cap, so outside appetite.` });
+  else if (L < P.minLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: sizeRule, value: money(L), outcome: "Fail", flag: "red", core: true, why: `Below the ${money(P.minLoan)} minimum.` });
+  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: sizeRule, value: money(L), outcome: "Pass", why: "Within the lending range." });
 
   // Term
   const maxT = amort ? P.maxTermAmort : P.maxTermIO;
-  if (T == null) add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: "3 to 15 years (up to 25 if capital repayment)", value: "-", outcome: "Unclear", why: missing("loan term") });
-  else add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: "3 to 15 years (up to 25 if capital repayment)", value: T + " years", outcome: T >= P.minTerm && T <= maxT ? "Pass" : "Fail", flag: T >= P.minTerm && T <= maxT ? null : "red", why: T >= P.minTerm && T <= maxT ? `Within ${P.minTerm} to ${maxT} years.` : `Outside ${P.minTerm} to ${maxT} years.` });
+  if (T == null) add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: `${P.minTerm} to ${P.maxTermIO} years (up to ${P.maxTermAmort} if capital repayment)`, value: "-", outcome: "Unclear", why: missing("loan term") });
+  else add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: `${P.minTerm} to ${P.maxTermIO} years (up to ${P.maxTermAmort} if capital repayment)`, value: T + " years", outcome: T >= P.minTerm && T <= maxT ? "Pass" : "Fail", flag: T >= P.minTerm && T <= maxT ? null : "red", why: T >= P.minTerm && T <= maxT ? `Within ${P.minTerm} to ${maxT} years.` : `Outside ${P.minTerm} to ${maxT} years.` });
 
   // LTV
   const single = c.tenants.length === 1;
@@ -936,8 +992,8 @@ function computeChecks(c) {
 
   // EPC
   const epc = String(usable(c, "epc_rating") || "").toUpperCase().match(/\b([A-G])\b/);
-  if (!epc) add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: "E or better", value: "-", outcome: "Unclear", why: "No EPC rating in the pack." });
-  else { const ok = "ABCDE".includes(epc[1]); add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: "E or better", value: epc[1], outcome: ok ? "Pass" : "Fail", flag: ok ? (epc[1] === "E" ? "amber" : null) : "red", why: ok ? `EPC ${epc[1]} meets minimum energy standards.` : `EPC ${epc[1]} is below E, so the property cannot lawfully be let without works.` }); }
+  if (!epc) add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: `${P.minEPC} or better`, value: "-", outcome: "Unclear", why: "No EPC rating in the pack." });
+  else { const ok = "ABCDEFG".indexOf(epc[1]) <= "ABCDEFG".indexOf(P.minEPC || "E"); add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: `${P.minEPC} or better`, value: epc[1], outcome: ok ? "Pass" : "Fail", flag: ok ? (epc[1] === P.minEPC ? "amber" : null) : "red", why: ok ? `EPC ${epc[1]} meets the policy minimum of ${P.minEPC}.` : `EPC ${epc[1]} is below the policy minimum of ${P.minEPC}${"FG".includes(epc[1]) ? ", and the property cannot lawfully be let without works" : ""}.` }); }
 
   // WAULT and concentration
   const today = new Date();
@@ -970,9 +1026,9 @@ function computeChecks(c) {
 
   // Accounts age (BS-06)
   const ye = parseDate(usable(c, "accounts_year_end"));
-  if (!ye) add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age (accounts within 12 months)", rule: "Year end within the last 12 months", value: "-", outcome: "Unclear", why: "No accounts year end found." });
+  if (!ye) add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age", rule: `Year end within the last ${P.accountsMonths} months`, value: "-", outcome: "Unclear", why: "No accounts year end found." });
   else { const months = (today - ye) / (30.44 * 864e5); const ok = months <= P.accountsMonths;
-    add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age (accounts within 12 months)", rule: "Year end within the last 12 months", value: ye.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }), outcome: ok ? "Pass" : "Fail", flag: ok ? null : "red", outOfDate: !ok, why: ok ? `${Math.floor(months)} months old.` : `${Math.floor(months)} months old, so out of date. Ask for newer accounts.` }); }
+    add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age", rule: `Year end within the last ${P.accountsMonths} months`, value: ye.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }), outcome: ok ? "Pass" : "Fail", flag: ok ? null : "red", outOfDate: !ok, why: ok ? `${Math.floor(months)} months old.` : `${Math.floor(months)} months old, so out of date. Ask for newer accounts.` }); }
 
   c.checks = checks;
 }
@@ -1032,7 +1088,7 @@ function maxLoanFor(c, o) {
   if (o.V) caps.push({ by: "LTV", v: (o.V * m.ltvMax) / 100 });
   if (o.R != null) caps.push({ by: "ICR", v: o.R / (POLICY.minICR * m.rUsed / 100) });
   if (o.amort && o.R != null && o.T) { const r = m.rUsed / 100 / 12, n = o.T * 12; const perPound = (r / (1 - Math.pow(1 + r, -n))) * 12; caps.push({ by: "DSCR", v: o.R / (POLICY.minDSCR * perPound) }); }
-  caps.push({ by: "the £10m cap", v: POLICY.maxLoan });
+  caps.push({ by: `the ${money(POLICY.maxLoan)} cap`, v: POLICY.maxLoan });
   const best = caps.sort((a, b) => a.v - b.v)[0];
   return { v: Math.floor(best.v / 5000) * 5000, by: best.by };
 }
@@ -1616,7 +1672,7 @@ function renderMemo(c) {
 let draftDecision = { role: "Underwriter", choice: "", grade: "", rationale: "", conditions: "" };
 function authority(c, role) {
   const L = num(c, "loan_amount") || 0; const exc = c.rec && c.rec.exceptions.length;
-  if (L > POLICY.maxLoan) return { canApprove: false, why: "Over £10m is outside appetite. No one can approve it." };
+  if (L > POLICY.maxLoan) return { canApprove: false, why: `Over ${money(POLICY.maxLoan)} is outside appetite. No one can approve it.` };
   if (role === "Underwriter") {
     if (L > POLICY.uwLimit) return { canApprove: false, why: "Over £1m, so only Credit Committee can approve. You can escalate." };
     if (exc) return { canApprove: false, why: "Policy exception, so only Credit Committee can approve. You can escalate." };

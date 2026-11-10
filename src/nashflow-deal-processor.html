@@ -521,7 +521,7 @@ const POLICY = {
   version: "Flow doc v0.6, section 7.1",
   minLoan: 250000, maxLoan: 10000000, minTerm: 3, maxTermIO: 15, maxTermAmort: 25,
   maxLTV: 70, maxLTVSingle: 65, minICR: 1.5, stressRate: 6.5, minDSCR: 1.25,
-  minWAULT: 3, concentration: 50, accountsMonths: 12, uwLimit: 1000000,
+  minWAULT: 3, concentration: 50, accountsMonths: 12, uwLimit: 1000000, minEPC: "E",
   /* 7.2 Standard financial covenants: ongoing tests in the facility agreement, with headroom over the day-one limits */
   /* 7.3 Pricing grid (illustrative): margin over the reference rate by LTV band, adjusted for risk grade and risk features */
   pricing: {
@@ -533,6 +533,61 @@ const POLICY = {
   },
   covLTV: 75, covICR: 1.35, covDSCR: 1.15, covTesting: "LTV annually on a lender-instructed valuation; ICR and DSCR quarterly on a 12-month rolling basis",
 };
+/* A lender can publish its own credit policy (Credit policies page). The policy agent reads the document and proposes
+   the value of each rule below with the clause and exact words; a person checks them and publishes. The calculated
+   checks then use the published values. Saved in this browser. */
+const POLICY_DEFAULT = JSON.parse(JSON.stringify(POLICY));
+const POLICY_RULES = [
+  { key: "minLoan", label: "Minimum loan", unit: "money", meaning: "smallest loan the lender will make, in pounds" },
+  { key: "maxLoan", label: "Maximum loan", unit: "money", meaning: "largest loan the lender will make, in pounds (above this is outside appetite)" },
+  { key: "minTerm", label: "Minimum term", unit: "years", meaning: "shortest loan term in years" },
+  { key: "maxTermIO", label: "Maximum term, interest only", unit: "years", meaning: "longest term in years for an interest-only loan" },
+  { key: "maxTermAmort", label: "Maximum term, capital repayment", unit: "years", meaning: "longest term in years for an amortising (capital repayment) loan" },
+  { key: "maxLTV", label: "Maximum LTV", unit: "pct", meaning: "maximum loan to value, percent, for standard multi-let property" },
+  { key: "maxLTVSingle", label: "Maximum LTV, single-let or specialist", unit: "pct", meaning: "maximum loan to value, percent, for single-let or specialist property" },
+  { key: "minICR", label: "Minimum interest cover (ICR)", unit: "x", meaning: "minimum interest cover ratio, times (e.g. 1.5)" },
+  { key: "stressRate", label: "ICR stress rate", unit: "pct", meaning: "stressed interest rate in percent used for the ICR test" },
+  { key: "minDSCR", label: "Minimum debt service cover (DSCR)", unit: "x", meaning: "minimum debt service cover ratio for amortising loans, times" },
+  { key: "minWAULT", label: "Minimum WAULT", unit: "years", meaning: "minimum weighted average unexpired lease term, years" },
+  { key: "concentration", label: "Tenant concentration flag", unit: "pct", meaning: "percent of rent from one tenant above which concentration is flagged" },
+  { key: "accountsMonths", label: "Maximum age of accounts", unit: "months", meaning: "how many months old the latest accounts year end can be" },
+  { key: "minEPC", label: "Minimum EPC rating", unit: "grade", meaning: "lowest acceptable EPC rating, one letter A to G" },
+  { key: "covLTV", label: "LTV covenant", unit: "pct", meaning: "ongoing LTV covenant in the facility agreement, percent" },
+  { key: "covICR", label: "ICR covenant", unit: "x", meaning: "ongoing ICR covenant in the facility agreement, times" },
+  { key: "covDSCR", label: "DSCR covenant", unit: "x", meaning: "ongoing DSCR covenant in the facility agreement, times" },
+];
+function policyValueText(r, v) {
+  if (v == null || v === "") return "-";
+  return r.unit === "money" ? money(v) : r.unit === "pct" ? v + "%" : r.unit === "x" ? v + "x" : r.unit === "years" ? v + " years" : r.unit === "months" ? v + " months" : String(v);
+}
+function cleanPolicyValue(r, v) {
+  if (v == null || v === "") return null;
+  if (r.unit === "grade") { const m = String(v).toUpperCase().match(/[A-G]/); return m ? m[0] : null; }
+  const n = parseFloat(String(v).replace(/[£,%x\s]/gi, "").replace(/m$/i, "e6").replace(/k$/i, "e3"));
+  return isFinite(n) && n > 0 ? n : null;
+}
+let policyStore = load("nashflow.policy", { active: null, history: [] });
+function applyPolicy(active) {
+  POLICY_RULES.forEach((r) => { POLICY[r.key] = POLICY_DEFAULT[r.key]; });
+  POLICY.name = POLICY_DEFAULT.name; POLICY.version = POLICY_DEFAULT.version;
+  if (active) { POLICY_RULES.forEach((r) => { if (active.values[r.key] != null) POLICY[r.key] = active.values[r.key]; }); POLICY.name = active.name || POLICY.name; POLICY.version = active.version || "Published " + new Date(active.at).toLocaleDateString("en-GB"); }
+  try { Object.assign(COVENANTS, { ltv: POLICY.covLTV, icr: POLICY.covICR, dscr: POLICY.covDSCR }); } catch (e) { /* COVENANTS is set from POLICY when it is declared */ }
+}
+applyPolicy(policyStore.active);
+function policyPrompt(doc) {
+  return `You are the policy agent for a UK commercial property lender. Read the lender's credit policy below and find the value it sets for each rule in this list.
+
+${POLICY_RULES.map((r) => `- ${r.key}: ${r.meaning}`).join("\n")}
+
+Reply with JSON only, in this shape:
+{"policy_name": "the policy's title", "version": "its version or date if stated", "rules": {"maxLTV": {"value": 65, "clause": "4.2", "page": 3, "quote": "exact words from the policy"}}}
+
+Use a plain number for value (no £, % or x; 7500000 not 7.5m). For minEPC use one letter. Give the clause number if there is one. Quote the exact words that set the value. If the policy does not set a rule, give {"value": null}. Do not guess.
+
+CREDIT POLICY: ${doc.name}
+${doc.pages.map((t, i) => `[Page ${i + 1}]\n${t}`).join("\n\n")}`;
+}
+
 const JUDGEMENT_AREAS = [
   { area: "Property type", clause: "7.1 Property type", rule: "Retail, office, industrial and mixed use. Specialist uses (for example petrol stations, hotels) by exception." },
   { area: "Borrower", clause: "7.1 Borrower", rule: "UK limited company or SPV, with personal guarantees from principal directors." },
@@ -1065,15 +1120,16 @@ function computeChecks(c) {
   const missing = (names) => `Cannot calculate: ${names} not available.`;
 
   // Loan size
-  if (L == null) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: "-", outcome: "Unclear", why: missing("loan amount") });
-  else if (L > P.maxLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Above the £10m cap, so outside appetite.` });
-  else if (L < P.minLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Fail", flag: "red", core: true, why: `Below the £250,000 minimum.` });
-  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: "£250,000 to £10,000,000", value: money(L), outcome: "Pass", why: "Within the lending range." });
+  const sizeRule = `${money(P.minLoan)} to ${money(P.maxLoan)}`;
+  if (L == null) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: sizeRule, value: "-", outcome: "Unclear", why: missing("loan amount") });
+  else if (L > P.maxLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: sizeRule, value: money(L), outcome: "Fail", flag: "red", core: true, why: `Above the ${money(P.maxLoan)} cap, so outside appetite.` });
+  else if (L < P.minLoan) add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: sizeRule, value: money(L), outcome: "Fail", flag: "red", core: true, why: `Below the ${money(P.minLoan)} minimum.` });
+  else add({ id: "size", area: "Loan size", clause: "7.1 Loan size", rule: sizeRule, value: money(L), outcome: "Pass", why: "Within the lending range." });
 
   // Term
   const maxT = amort ? P.maxTermAmort : P.maxTermIO;
-  if (T == null) add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: "3 to 15 years (up to 25 if capital repayment)", value: "-", outcome: "Unclear", why: missing("loan term") });
-  else add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: "3 to 15 years (up to 25 if capital repayment)", value: T + " years", outcome: T >= P.minTerm && T <= maxT ? "Pass" : "Fail", flag: T >= P.minTerm && T <= maxT ? null : "red", why: T >= P.minTerm && T <= maxT ? `Within ${P.minTerm} to ${maxT} years.` : `Outside ${P.minTerm} to ${maxT} years.` });
+  if (T == null) add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: `${P.minTerm} to ${P.maxTermIO} years (up to ${P.maxTermAmort} if capital repayment)`, value: "-", outcome: "Unclear", why: missing("loan term") });
+  else add({ id: "term", area: "Loan term", clause: "7.1 Loan term", rule: `${P.minTerm} to ${P.maxTermIO} years (up to ${P.maxTermAmort} if capital repayment)`, value: T + " years", outcome: T >= P.minTerm && T <= maxT ? "Pass" : "Fail", flag: T >= P.minTerm && T <= maxT ? null : "red", why: T >= P.minTerm && T <= maxT ? `Within ${P.minTerm} to ${maxT} years.` : `Outside ${P.minTerm} to ${maxT} years.` });
 
   // LTV
   const single = c.tenants.length === 1;
@@ -1111,8 +1167,8 @@ function computeChecks(c) {
 
   // EPC
   const epc = String(usable(c, "epc_rating") || "").toUpperCase().match(/\b([A-G])\b/);
-  if (!epc) add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: "E or better", value: "-", outcome: "Unclear", why: "No EPC rating in the pack." });
-  else { const ok = "ABCDE".includes(epc[1]); add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: "E or better", value: epc[1], outcome: ok ? "Pass" : "Fail", flag: ok ? (epc[1] === "E" ? "amber" : null) : "red", why: ok ? `EPC ${epc[1]} meets minimum energy standards.` : `EPC ${epc[1]} is below E, so the property cannot lawfully be let without works.` }); }
+  if (!epc) add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: `${P.minEPC} or better`, value: "-", outcome: "Unclear", why: "No EPC rating in the pack." });
+  else { const ok = "ABCDEFG".indexOf(epc[1]) <= "ABCDEFG".indexOf(P.minEPC || "E"); add({ id: "epc", area: "Energy rating (EPC)", clause: "7.1 Energy rating", rule: `${P.minEPC} or better`, value: epc[1], outcome: ok ? "Pass" : "Fail", flag: ok ? (epc[1] === P.minEPC ? "amber" : null) : "red", why: ok ? `EPC ${epc[1]} meets the policy minimum of ${P.minEPC}.` : `EPC ${epc[1]} is below the policy minimum of ${P.minEPC}${"FG".includes(epc[1]) ? ", and the property cannot lawfully be let without works" : ""}.` }); }
 
   // WAULT and concentration
   const today = new Date();
@@ -1145,9 +1201,9 @@ function computeChecks(c) {
 
   // Accounts age (BS-06)
   const ye = parseDate(usable(c, "accounts_year_end"));
-  if (!ye) add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age (accounts within 12 months)", rule: "Year end within the last 12 months", value: "-", outcome: "Unclear", why: "No accounts year end found." });
+  if (!ye) add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age", rule: `Year end within the last ${P.accountsMonths} months`, value: "-", outcome: "Unclear", why: "No accounts year end found." });
   else { const months = (today - ye) / (30.44 * 864e5); const ok = months <= P.accountsMonths;
-    add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age (accounts within 12 months)", rule: "Year end within the last 12 months", value: ye.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }), outcome: ok ? "Pass" : "Fail", flag: ok ? null : "red", outOfDate: !ok, why: ok ? `${Math.floor(months)} months old.` : `${Math.floor(months)} months old, so out of date. Ask for newer accounts.` }); }
+    add({ id: "accounts", area: "Accounts age", clause: "7.1 Document age", rule: `Year end within the last ${P.accountsMonths} months`, value: ye.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" }), outcome: ok ? "Pass" : "Fail", flag: ok ? null : "red", outOfDate: !ok, why: ok ? `${Math.floor(months)} months old.` : `${Math.floor(months)} months old, so out of date. Ask for newer accounts.` }); }
 
   c.checks = checks;
 }
@@ -1207,7 +1263,7 @@ function maxLoanFor(c, o) {
   if (o.V) caps.push({ by: "LTV", v: (o.V * m.ltvMax) / 100 });
   if (o.R != null) caps.push({ by: "ICR", v: o.R / (POLICY.minICR * m.rUsed / 100) });
   if (o.amort && o.R != null && o.T) { const r = m.rUsed / 100 / 12, n = o.T * 12; const perPound = (r / (1 - Math.pow(1 + r, -n))) * 12; caps.push({ by: "DSCR", v: o.R / (POLICY.minDSCR * perPound) }); }
-  caps.push({ by: "the £10m cap", v: POLICY.maxLoan });
+  caps.push({ by: `the ${money(POLICY.maxLoan)} cap`, v: POLICY.maxLoan });
   const best = caps.sort((a, b) => a.v - b.v)[0];
   return { v: Math.floor(best.v / 5000) * 5000, by: best.by };
 }
@@ -1705,7 +1761,7 @@ const ROLE_INFO = {
   Underwriter: "Reviews each submitted case, sets conditions and decides credit.",
   Commercial: "Approves pricing. Cannot decide credit.",
 };
-const ROLE_VIEWS = { "Relationship Manager": ["new", "cases", "case", "inbox", "policy", "agents", "processes"], Underwriter: ["cases", "case", "policy", "agents", "processes"], Commercial: ["cases", "case", "grid", "policy", "processes"] };
+const ROLE_VIEWS = { "Relationship Manager": ["new", "cases", "case", "inbox", "policy", "agents", "usage", "processes"], Underwriter: ["cases", "case", "policy", "agents", "processes"], Commercial: ["cases", "case", "grid", "policy", "processes"] };
 /* Broker submission is one lending process among several. The others are shown so the audience sees where NashFlow goes next; only broker submission runs in this demo. */
 const PROCESSES = [
   { id: "broker", name: "Broker submission", status: "Running in this demo", tone: "c-green", what: "A broker emails a deal pack for a commercial property loan. The agents read it, chase anything missing, check it against policy and draft the credit memo. The RM adds their view, the Underwriter decides and Commercial approves pricing.",
@@ -1739,7 +1795,7 @@ function renderNav() {
     $("#navAdmin").innerHTML = `<div class="navlabel">Reference</div>${item("grid", "Pricing grid")}${item("policy", "Credit policies")}`;
   } else {
     $("#navCases").innerHTML = `<div class="navlabel">Cases</div>${item("cases", "My cases", mine || cases.length)}${item("new", "New case")}${item("case", "Case management", null, !c)}`;
-    $("#navAdmin").innerHTML = `<div class="navlabel">Administration</div>${item("inbox", "Deals inbox")}${item("policy", "Credit policies")}${item("agents", "AI governance")}`;
+    $("#navAdmin").innerHTML = `<div class="navlabel">Administration</div>${item("inbox", "Deals inbox")}${item("policy", "Credit policies")}${item("agents", "AI governance")}${item("usage", "AI usage")}`;
   }
 }
 
@@ -2095,7 +2151,7 @@ function wiResult(c) {
   const termMax = o.amort ? POLICY.maxTermAmort : POLICY.maxTermIO;
   const chip = (ok, txt) => `<span class="chip ${ok == null ? "c-grey" : ok ? "c-green" : "c-red"}">${txt}</span>`;
   const rows = [
-    ["Loan size", money(o.L), o.L == null ? null : o.L >= POLICY.minLoan && o.L <= POLICY.maxLoan, "£250k to £10m"],
+    ["Loan size", money(o.L), o.L == null ? null : o.L >= POLICY.minLoan && o.L <= POLICY.maxLoan, `${money(POLICY.minLoan)} to ${money(POLICY.maxLoan)}`],
     ["Term", o.T ? o.T + " years" : "-", o.T == null ? null : o.T >= POLICY.minTerm && o.T <= termMax, `${POLICY.minTerm} to ${termMax} years`],
     ["LTV", pct(m.ltv), m.ltv == null ? null : m.ltv <= m.ltvMax + 1e-9, `up to ${m.ltvMax}%`],
     ["ICR", times(m.icr), m.icr == null ? null : m.icr >= POLICY.minICR, `at least ${POLICY.minICR}x at ${m.rUsed}%`],
@@ -2456,7 +2512,33 @@ function chText(c) {
     + (h.psc.length ? `\n\nPersons with significant control: ${h.psc.map((x) => x.name).join("; ")}.` : "")
     + "\n\nLand Registry and credit bureau checks are not connected in this prototype.";
 }
-function chCard(c) {
+/* Look up any company at Companies House, without changing the case: for showing a live record in a demo */
+let chAny = { num: "", busy: false, r: null, err: "" };
+async function chLookupAny(num) {
+  num = String(num || "").replace(/\s/g, "").toUpperCase(); if (/^\d{6,7}$/.test(num)) num = num.padStart(8, "0");
+  chAny = { num, busy: true, r: null, err: "" }; render();
+  try {
+    if (!/^[A-Z0-9]{8}$/.test(num)) throw new Error("Enter an 8-character company number, for example 07145051.");
+    const prof = await chGet("/company/" + num); if (!prof) throw new Error(`Company ${num} not found at Companies House.`);
+    const [off, chg] = await Promise.all([chGet(`/company/${num}/officers?items_per_page=50`).catch(() => null), chGet(`/company/${num}/charges`).catch(() => null)]);
+    chAny.r = { prof, officers: ((off && off.items) || []).filter((o) => !o.resigned_on), charges: ((chg && chg.items) || []).filter((x) => x.status === "outstanding").length };
+  } catch (e) { chAny.err = e.message || String(e); }
+  chAny.busy = false; render();
+}
+function chAnyHtml() {
+  const r = chAny.r; let out = "";
+  if (chAny.busy) out = `<p class="hint">Checking Companies House...</p>`;
+  else if (chAny.err) out = `<div class="errbox">${esc(chAny.err)}</div>`;
+  else if (r) { const p = r.prof, a = p.registered_office_address || {}; const dirs = r.officers.filter((o) => o.officer_role === "director");
+    out = `<p><b>${esc(p.company_name)}</b> · ${esc(chAny.num)} · <span class="chip ${p.company_status === "active" ? "c-green" : "c-red"}">${esc(p.company_status)}</span> · incorporated ${p.date_of_creation ? dateOf(p.date_of_creation) : "-"}<br><span class="note">${esc([a.address_line_1, a.address_line_2, a.locality, a.postal_code].filter(Boolean).join(", "))}</span></p>
+      <p class="note">${dirs.length} current director${dirs.length === 1 ? "" : "s"}${dirs.length ? ": " + esc(dirs.slice(0, 6).map((o) => o.name).join("; ")) + (dirs.length > 6 ? " and others" : "") : ""}. ${r.charges} outstanding charge${r.charges === 1 ? "" : "s"}.${p.accounts && p.accounts.overdue ? " Accounts overdue." : ""}${p.has_insolvency_history ? " Has insolvency history." : ""}</p>
+      <p><a href="https://find-and-update.company-information.service.gov.uk/company/${esc(chAny.num)}" target="_blank" rel="noopener">Open on Companies House</a></p>`; }
+  return `<details class="chany" ${chAny.num ? "open" : ""}><summary class="note">Look up any company</summary>
+    <div class="row"><input id="chAnyNum" type="text" placeholder="Company number" value="${esc(chAny.num)}" style="max-width:180px"><button class="btn small" type="button" data-act="ch-any">Look up</button></div>${out}
+    <p class="note">For reference only. It does not change this case.</p></details>`;
+}
+function chCard(c) { const h0 = chCardBase(c); return settings.chKey ? h0.replace(/<\/div>$/, chAnyHtml() + "</div>") : h0; }
+function chCardBase(c) {
   const h = c.ch;
   const btn = `<button class="btn small" type="button" data-act="ch-run">${h && h.profile ? "Check again" : "Check Companies House"}</button>`;
   if (!settings.chKey) return `<div class="card"><div class="cardhead"><h2>Companies House</h2><span class="chip c-grey">Not connected</span></div><p class="hint">Add a Companies House key in Settings to check the borrower live.</p></div>`;
@@ -2630,7 +2712,7 @@ function renderReview(c) {
 }
 function authority(c) {
   const L = num(c, "loan_amount") || 0;
-  if (L > POLICY.maxLoan) return { canApprove: false, why: "Over £10m is outside appetite. No one can approve it." };
+  if (L > POLICY.maxLoan) return { canApprove: false, why: `Over ${money(POLICY.maxLoan)} is outside appetite. No one can approve it.` };
   return { canApprove: true, why: "" };
 }
 function decisionSummary(c) {
@@ -2671,7 +2753,7 @@ function renderDecision(c) {
   const L = num(c, "loan_amount");
   const side = `<div class="stack">${flowCard(c)}<div class="card"><h2>Approval authority</h2>
       <div class="signoff"><div><b>Underwriter</b><span>Every case up to £10m, including policy exceptions with a recorded reason</span></div><span class="chip c-green">Decides this case</span></div>
-      <p class="hint">Loan ${money(L)}${c.rec.exceptions.length ? "; policy exception: " + esc(c.rec.exceptions.join(", ")) : "; no policy exception"}. Over £10m is outside appetite.</p></div></div>`;
+      <p class="hint">Loan ${money(L)}${c.rec.exceptions.length ? "; policy exception: " + esc(c.rec.exceptions.join(", ")) : "; no policy exception"}. Over ${money(POLICY.maxLoan)} is outside appetite.</p></div></div>`;
   const recbar = recBar(c, 3);
   const sub = c.submitted ? `<div class="card"><h2>Note from the Relationship Manager</h2><p class="hint">Submitted by ${esc(c.submitted.by)}, ${dateOf(c.submitted.at)} ${timeOf(c.submitted.at)}.</p><div class="memo-body">${c.submitted.note ? renderRich(c.submitted.note) : '<p class="note">No note.</p>'}</div></div>` : "";
   const ret = st === "returned" && c.returned ? `<div class="errbox"><b>Returned by the Underwriter, ${dateOf(c.returned.at)} ${timeOf(c.returned.at)}.</b> ${esc(c.returned.reason)}</div>` : "";
@@ -2800,15 +2882,16 @@ function wordDoc(title, html) {
 function renderAudit(c) {
   return `<div class="card"><h2>Audit trail</h2><p class="hint">Every agent and human action on this case, oldest first. Policy version: ${esc(POLICY.version)}.</p><ul class="audit">${c.audit.map((a) => `<li><span class="num note">${timeOf(a.at)}</span><span class="who ${a.kind === "agent" ? "agent" : ""}">${esc(a.who)}</span><span class="what">${esc(a.what)}</span></li>`).join("")}</ul></div>`;
 }
-function renderPolicyAdmin() {
-  const P = POLICY;
+let policyDraft = null; // { state: "reading" | "review" | "error", file, name, version, rules, values, error }
+function policyRulesTable() {
+  const P = POLICY; const tm = (v) => money(v);
   const rows = [
-    ["Loan size", "£250,000 to £10,000,000", "Calculated"], ["Loan term", "3 to 15 years; up to 25 years capital repayment", "Calculated"],
+    ["Loan size", `${tm(P.minLoan)} to ${tm(P.maxLoan)}`, "Calculated"], ["Loan term", `${P.minTerm} to ${P.maxTermIO} years; up to ${P.maxTermAmort} years capital repayment`, "Calculated"],
     ["Loan to value (LTV)", `Up to ${P.maxLTV}% of market value; up to ${P.maxLTVSingle}% for specialist or single-let property`, "Calculated"],
     ["Interest cover (ICR)", `Rent covers interest at least ${P.minICR} times, at the higher of the pay rate or a ${P.stressRate}% stressed rate`, "Calculated"],
     ["Debt service cover (DSCR)", `At least ${P.minDSCR} times where the loan amortises`, "Calculated"],
     ["Location", "England, Wales, Scotland and Northern Ireland", "Calculated"],
-    ["Energy rating", "EPC E or better", "Calculated"],
+    ["Energy rating", `EPC ${P.minEPC} or better`, "Calculated"],
     ["Income quality", `WAULT of at least ${P.minWAULT} years; flag where one tenant pays over ${P.concentration}% of rent; tenant covenant strength`, "Mixed"],
     ["Document age", `Accounts year end within the last ${P.accountsMonths} months`, "Calculated"],
     ["Property type", "Retail, office, industrial and mixed use. Specialist uses by exception", "Reasoned"],
@@ -2817,11 +2900,107 @@ function renderPolicyAdmin() {
     ["Adverse credit", "No unsatisfied CCJs or insolvency events; explained historic adverse considered", "Reasoned"],
     ["Standard covenants (7.2)", `LTV no more than ${P.covLTV}%, ICR at least ${P.covICR}x, DSCR at least ${P.covDSCR}x if amortising. ${P.covTesting}. Set with headroom over the day-one limits so a small dip does not cause a breach`, "Calculated"],
     ["Pricing grid (7.3)", `Margin over a ${pctTxt(P.pricing.referenceRate)} reference rate by LTV band (${P.pricing.bands.map((x) => "up to " + x[0] + "%: " + pctTxt(x[1])).join(", ")}), adjusted for risk grade, short WAULT, tenant concentration, EPC below C and approved exceptions; floor ${pctTxt(P.pricing.floorMargin)}. Arrangement fee ${pctTxt(P.pricing.feeSmall)} under £1m, ${pctTxt(P.pricing.feeLarge)} from £1m, minimum £5,000. Proposed by the RM and approved by Commercial`, "Calculated"],
-    ["Approval authority", "Underwriter approves every case up to £10m, including policy exceptions with a recorded reason; over £10m outside appetite. No Credit Committee", "Calculated"],
+    ["Approval authority", `Underwriter approves every case up to ${tm(P.maxLoan)}, including policy exceptions with a recorded reason; over ${tm(P.maxLoan)} outside appetite. No Credit Committee`, "Calculated"],
   ];
-  return pageHead("Credit policies", "Credit policies", "The policy the agents test each case against. This prototype uses the illustrative UK market standard policy from the broker submission flow doc. In the product, the Client Admin uploads the lender's own policy and an agent extracts the rules with links to each clause.") +
-    `<div class="tablewrap"><table class="t"><thead><tr><th>Policy area</th><th>Criterion</th><th>Check type</th></tr></thead><tbody>${rows.map((r) => `<tr><td><b>${r[0]}</b></td><td>${r[1]}</td><td><span class="chip ${r[2] === "Calculated" ? "c-blue" : r[2] === "Mixed" ? "c-amber" : "c-grey"}">${r[2]}</span></td></tr>`).join("")}</tbody></table></div>
-    <p class="note" style="margin-top:10px">${esc(P.version)}. Figures are inferred from market norms, not taken from a lender.</p>`;
+  return `<div class="tablewrap"><table class="t"><thead><tr><th>Policy area</th><th>Criterion</th><th>Check type</th></tr></thead><tbody>${rows.map((r) => `<tr><td><b>${r[0]}</b></td><td>${esc(r[1])}</td><td><span class="chip ${r[2] === "Calculated" ? "c-blue" : r[2] === "Mixed" ? "c-amber" : "c-grey"}">${r[2]}</span></td></tr>`).join("")}</tbody></table></div>`;
+}
+function policyUploadCard() {
+  const d = policyDraft;
+  if (d && d.state === "reading") return `<div class="card"><h2>Reading ${esc(d.file)}</h2><p class="hint"><span class="spin"></span> The policy agent is reading the policy and finding the value of each rule the checks use.</p></div>`;
+  if (d && d.state === "review") {
+    const changed = POLICY_RULES.filter((r) => d.values[r.key] != null && String(d.values[r.key]) !== String(POLICY[r.key])).length;
+    const row = (r) => {
+      const x = d.rules[r.key] || {}; const v = d.values[r.key]; const found = x.value != null;
+      const status = !found && v == null ? `<span class="chip c-grey">Not in document</span>` : String(v) === String(POLICY[r.key]) ? `<span class="chip c-green">Same</span>` : `<span class="chip c-amber">Changes</span>`;
+      return `<tr><td><b>${esc(r.label)}</b></td><td class="num">${esc(policyValueText(r, POLICY[r.key]))}</td><td><input class="ed" data-polv="${r.key}" value="${esc(v == null ? "" : v)}" placeholder="Keep current" style="max-width:130px"></td><td>${status}</td><td class="note">${found ? `${x.clause ? "<b>" + esc(x.clause) + "</b> " : ""}${x.page ? "p" + esc(x.page) + " " : ""}${x.quote ? "“" + esc(x.quote) + "”" : ""}` : "Not set by this policy, so the current value stays."}</td></tr>`;
+    };
+    return `<div class="card"><h2>Check the rules from ${esc(d.file)}</h2>
+      <p class="hint">The policy agent found these values, with the clause and exact words for each. Correct any it got wrong, then publish. ${changed} rule${changed === 1 ? "" : "s"} will change. Blank keeps the current value.</p>
+      <div class="row" style="margin-bottom:10px"><div class="field grow"><label for="polName">Policy name</label><input class="ed" id="polName" value="${esc(d.name)}"></div><div class="field grow"><label for="polVer">Version</label><input class="ed" id="polVer" value="${esc(d.version)}"></div></div>
+      <div class="tablewrap"><table class="t"><thead><tr><th>Rule</th><th>Current</th><th>New policy</th><th></th><th>Source</th></tr></thead><tbody>${POLICY_RULES.map(row).join("")}</tbody></table></div>
+      <p class="hint">Judgement areas (property type, borrower, experience, adverse credit) are read by the memo agent from the policy text.</p>
+      <div class="row"><button class="btn primary" type="button" data-act="pol-publish">Publish policy and recheck open cases</button><button class="btn" type="button" data-act="pol-discard">Discard</button></div></div>`;
+  }
+  return `<div class="card"><h2>Add a new credit policy</h2>
+    <p class="hint">Upload the lender's credit policy (PDF, Word or text). The policy agent reads it and finds the value of each rule the checks use, with the clause and exact words. You check them and publish. Cases still open are then rechecked against the new rules; decided cases keep the policy they were decided under.</p>
+    ${d && d.state === "error" ? `<p class="errbox">${esc(d.error)}</p>` : ""}
+    <div class="row"><button class="btn primary" type="button" data-act="pol-upload">Upload policy document</button></div>
+    <details style="margin-top:10px"><summary>Or paste the policy text</summary><textarea class="ed" id="polText" rows="6" placeholder="Paste the credit policy here"></textarea><div class="row" style="margin-top:6px"><button class="btn small" type="button" data-act="pol-paste">Read pasted text</button></div></details>
+    <input type="file" id="policyFile" hidden accept=".pdf,.docx,.txt,.md"></div>`;
+}
+function renderPolicyAdmin() {
+  const a = policyStore.active; const admin = currentRole === "Relationship Manager";
+  const hist = policyStore.history || [];
+  const activeCard = `<div class="card"><h2>Policy in use</h2><p><b>${esc(POLICY.name)}</b> · ${esc(POLICY.version)}</p><p class="hint">${a ? `Published ${esc(new Date(a.at).toLocaleString("en-GB", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))} from ${esc(a.file || "pasted text")}.` : "The illustrative UK market standard policy from the broker submission flow doc. Figures are inferred from market norms, not taken from a lender."}</p>
+    ${a || hist.length ? `<div class="row">${a ? `<button class="btn small" type="button" data-act="pol-reset">Go back to the illustrative policy</button>` : ""}</div>${hist.length ? `<p class="note" style="margin-top:8px">Earlier: ${hist.slice(0, 4).map((h) => esc(h.name) + " (" + esc(new Date(h.at).toLocaleDateString("en-GB")) + ")").join(", ")}</p>` : ""}` : ""}</div>`;
+  return pageHead("Credit policies", "Credit policies", "The policy the agents test each case against. A Client Admin uploads the lender's own policy; the policy agent pulls out the rules with links to each clause and a person checks them before they go live.") +
+    `${activeCard}<div style="margin-top:14px">${admin ? policyUploadCard() : `<div class="card"><h2>Changing the policy</h2><p class="hint">The Client Admin uploads and publishes a new policy. Switch to Relationship Manager in this demo to try it.</p></div>`}</div>
+    <h2 style="margin:18px 0 8px">Rules in use</h2>${policyRulesTable()}`;
+}
+async function readPolicy(doc, file) {
+  policyDraft = { state: "reading", file }; render();
+  try {
+    const r = await askAI(policyPrompt(doc), [], "policy");
+    const rules = (r && r.rules) || {}; const values = {};
+    POLICY_RULES.forEach((x) => { const v = cleanPolicyValue(x, rules[x.key] && rules[x.key].value); values[x.key] = v; if (rules[x.key]) rules[x.key].value = v; });
+    if (!POLICY_RULES.some((x) => values[x.key] != null)) throw new Error("The policy agent didn't find any of the rules in this document. Check it is a credit policy.");
+    policyDraft = { state: "review", file, name: (r && r.policy_name) || file.replace(/\.[^.]+$/, ""), version: (r && r.version) || "", rules, values };
+  } catch (e) { policyDraft = { state: "error", error: (e && e.message) || String(e) }; }
+  render();
+}
+function recheckOpenCases() {
+  let n = 0;
+  cases.forEach((c) => {
+    if (!c.checks || (c.run && c.run.running) || (c.decision && c.decision.choice)) return;
+    computeChecks(c); computeAnalysis(c); computeRecommendation(c); refreshSystemSections(c);
+    const ps = c.run && c.run.steps.find((x) => x.id === "policy");
+    if (ps) ps.detail = `${c.checks.filter((k) => k.outcome === "Pass").length} pass, ${c.checks.filter((k) => k.outcome === "Fail").length} fail, ${c.checks.filter((k) => k.outcome === "Unclear").length} unclear (${POLICY.name})`;
+    if (c.memo) c.memoStale = true;
+    audit(c, "Policy agent", `Rechecked against ${POLICY.name}${POLICY.version ? ", " + POLICY.version : ""}`, "agent"); n++;
+  });
+  save(); return n;
+}
+function publishPolicy() {
+  const d = policyDraft; if (!d || d.state !== "review") return;
+  document.querySelectorAll("[data-polv]").forEach((el) => { const r = POLICY_RULES.find((x) => x.key === el.dataset.polv); d.values[r.key] = cleanPolicyValue(r, el.value); });
+  const name = ($("#polName") || {}).value || d.name, version = ($("#polVer") || {}).value || d.version;
+  if (policyStore.active) policyStore.history.unshift(policyStore.active);
+  policyStore.active = { name: name.trim() || "Lender credit policy", version: version.trim(), file: d.file, at: nowISO(), values: d.values };
+  store("nashflow.policy", policyStore); applyPolicy(policyStore.active); policyDraft = null;
+  const n = recheckOpenCases(); render();
+  toast(`Policy published. ${n} open case${n === 1 ? "" : "s"} rechecked.`);
+}
+function resetPolicy() {
+  if (policyStore.active) policyStore.history.unshift(policyStore.active);
+  policyStore.active = null; store("nashflow.policy", policyStore); applyPolicy(null);
+  const n = recheckOpenCases(); render(); toast(`Back to the illustrative policy. ${n} open case${n === 1 ? "" : "s"} rechecked.`);
+}
+/* Illustrative AI usage for the admin. In the product this comes from the lender's cloud subscription and each agent's run log. */
+function renderUsage() {
+  const A = [
+    ["Intake agent", "Fast model", 1248, 0.9, 0.2, 4, 61],
+    ["Extraction agent", "Large model, document reading", 312, 18.4, 3.1, 38, 402],
+    ["Companies House agent", "Code, no AI", 312, 0, 0, 2, 0],
+    ["Policy agent", "Code, no AI", 344, 0, 0, 1, 0],
+    ["Financial analysis agent", "Large model", 298, 9.6, 2.2, 27, 214],
+    ["Memo agent", "Reasoning model", 305, 22.1, 6.8, 71, 498],
+    ["Conditions agent", "Fast model", 221, 3.2, 0.6, 9, 33],
+    ["Policy reader", "Large model", 3, 41.0, 1.4, 64, 4],
+  ];
+  const total = A.reduce((s, a) => s + a[6], 0), budget = 2500, casesN = 312;
+  const max = Math.max(...A.map((a) => a[6]));
+  const days = [38, 41, 22, 9, 47, 52, 49, 58, 44, 12, 8, 61, 66, 57];
+  const dmax = Math.max(...days);
+  const tile = (b, l, s) => `<div class="stat"><b>${b}</b><span>${l}</span><small>${s}</small></div>`;
+  return pageHead("AI usage", "AI usage", "What the agents cost and how hard they work, by agent and by day. Illustrative figures for this demo. In the product they come from the lender's cloud subscription and each agent's run log.") +
+    `<div class="proto"><b>Example data.</b> These figures are made up to show the screen.</div>
+    <div class="stats">${tile("£" + total.toLocaleString("en-GB"), "AI spend this month", `${Math.round((total / budget) * 100)}% of the £${budget.toLocaleString("en-GB")} monthly cap`)}${tile(casesN, "Cases processed", "This month")}${tile("£" + (total / casesN).toFixed(2), "AI cost per case", "All agents together")}${tile("7%", "Agent output changed by a person", "Fields corrected or memo edited")}</div>
+    <div class="card" style="margin-top:14px"><h2>Monthly cap</h2><div style="background:var(--line,#eee);border-radius:6px;height:12px;overflow:hidden"><div style="width:${Math.round((total / budget) * 100)}%;height:100%;background:var(--accent)"></div></div>
+      <p class="hint">£${total.toLocaleString("en-GB")} of £${budget.toLocaleString("en-GB")}. The admin is alerted at 80%. At 100% agents pause and new cases wait for a person, so spend never goes over the cap.</p></div>
+    <div class="card" style="margin-top:14px"><h2>By agent, this month</h2><div class="tablewrap"><table class="t"><thead><tr><th>Agent</th><th>Model</th><th class="num">Runs</th><th class="num">Tokens in (k, avg)</th><th class="num">Tokens out (k, avg)</th><th class="num">Avg time</th><th class="num">Cost</th><th style="min-width:120px">Share</th></tr></thead><tbody>
+      ${A.map((a) => `<tr><td><b>${a[0]}</b></td><td>${a[1]}</td><td class="num">${a[2].toLocaleString("en-GB")}</td><td class="num">${a[3] ? a[3].toFixed(1) : "-"}</td><td class="num">${a[4] ? a[4].toFixed(1) : "-"}</td><td class="num">${a[5]}s</td><td class="num">£${a[6]}</td><td><div style="background:var(--accent);height:8px;border-radius:4px;width:${Math.max(2, Math.round((a[6] / max) * 100))}%" title="£${a[6]}"></div></td></tr>`).join("")}
+    </tbody></table></div><p class="hint">Each agent uses the model that fits the job and its cost. Checks that must be exact run in code, at no AI cost.</p></div>
+    <div class="card" style="margin-top:14px"><h2>Daily spend, last 14 days</h2><div style="display:flex;align-items:flex-end;gap:6px;height:120px">${days.map((v, i) => `<div style="flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;height:100%"><div style="width:100%;background:var(--accent);border-radius:3px 3px 0 0;height:${Math.round((v / dmax) * 100)}%" title="£${v}"></div><small class="note">${i % 2 ? "&nbsp;" : i + 1}</small></div>`).join("")}</div><p class="hint">Weekends are quieter. The peak days match broker deadlines.</p></div>`;
 }
 function renderAgentsAdmin() {
   const ai = "AI model chosen for this agent";
@@ -2843,7 +3022,7 @@ function render() {
   const c = cur();
   if (!ROLE_VIEWS[currentRole].includes(view)) view = "cases";
   if (view === "case" && !c) view = cases.length || currentRole !== "Relationship Manager" ? "cases" : "new";
-  const html = { new: renderNew, cases: renderCases, inbox: renderInbox, policy: renderPolicyAdmin, agents: renderAgentsAdmin, grid: renderGridPage, processes: renderProcesses }[view];
+  const html = { new: renderNew, cases: renderCases, inbox: renderInbox, policy: renderPolicyAdmin, agents: renderAgentsAdmin, usage: renderUsage, grid: renderGridPage, processes: renderProcesses }[view];
   $("#main").innerHTML = view === "case" ? renderCaseView(c) : html();
   hydratePages($("#main"));
 }
@@ -3203,6 +3382,12 @@ document.addEventListener("click", async (e) => {
   const c = cur(); if (!c) return;
   const act = t.dataset.act;
   if (act === "rerun") { runAgents(c); }
+  else if (act === "pol-upload") { const f = $("#policyFile"); if (f) f.click(); }
+  else if (act === "pol-paste") { const txt = (($("#polText") || {}).value || "").trim(); if (txt) readPolicy({ name: "Pasted policy", pages: [txt] }, "pasted text"); else toast("Paste the policy text first."); }
+  else if (act === "pol-publish") publishPolicy();
+  else if (act === "pol-discard") { policyDraft = null; render(); }
+  else if (act === "pol-reset") resetPolicy();
+  else if (act === "ch-any") { chLookupAny(($("#chAnyNum") || {}).value); }
   else if (act === "rerun-one") { rerunAgent(c, t.dataset.step); }
   else if (act === "redraft") { runAgents(c, true); }
   else if (act === "stop-run") { if (c.run && c.run.running) { c.run.cancel = "Stopped by " + actor() + "."; t.disabled = true; t.textContent = "Stopping after the current step"; audit(c, actor(), "Stopped the agents"); } }
@@ -3411,6 +3596,12 @@ function copyText(txt, msg) {
   if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(txt).then(() => toast(msg), () => fallbackCopy(txt, msg)); else fallbackCopy(txt, msg);
 }
 function fallbackCopy(txt, msg) { const ta = document.createElement("textarea"); ta.value = txt; document.body.append(ta); ta.select(); try { document.execCommand("copy"); toast(msg); } catch (e) { toast("Select the text and copy it yourself"); } ta.remove(); }
+document.addEventListener("change", async (e) => {
+  if (e.target.id !== "policyFile") return;
+  const f = e.target.files[0]; e.target.value = ""; if (!f) return;
+  policyDraft = { state: "reading", file: f.name }; render();
+  try { const doc = await readFile(f); await readPolicy(doc, f.name); } catch (err) { policyDraft = { state: "error", error: "Could not read " + f.name + ": " + ((err && err.message) || err) }; render(); }
+});
 $("#fileInput").addEventListener("change", (e) => { const files = [...e.target.files]; e.target.value = ""; if (files.length) newCaseFromFiles(files); });
 ["dragenter", "dragover"].forEach((ev) => document.addEventListener(ev, (e) => { const d = e.target.closest && e.target.closest("#drop"); if (d) { e.preventDefault(); d.classList.add("over"); } }));
 ["dragleave", "drop"].forEach((ev) => document.addEventListener(ev, (e) => { const d = e.target.closest && e.target.closest("#drop"); if (d) { e.preventDefault(); d.classList.remove("over"); } }));
