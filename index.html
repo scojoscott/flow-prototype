@@ -1772,13 +1772,13 @@ const ROLE_INFO = {
 const ROLE_VIEWS = { "Relationship Manager": ["new", "cases", "case", "inbox", "policy", "agents", "usage", "processes"], Underwriter: ["cases", "case", "policy", "agents", "processes"], Commercial: ["cases", "case", "grid", "policy", "processes"] };
 /* Broker submission is one lending process among several. The others are shown so the audience sees where NashFlow goes next; only broker submission runs in this demo. */
 const PROCESSES = [
-  { id: "broker", name: "Broker submission", status: "Running in this demo", tone: "c-green", what: "A broker emails a deal pack for a commercial property loan. The agents read it, chase anything missing, check it against policy and draft the credit memo. The RM adds their view, the Underwriter decides and Commercial approves pricing.",
+  { id: "broker", name: "Broker submission", status: "Live", tone: "c-green", what: "A broker emails a deal pack for a commercial property loan. The agents read it, chase anything missing, check it against policy and draft the credit memo. The RM adds their view, the Underwriter decides and Commercial approves pricing.",
     steps: ["Email in", "Read and extract", "Chase the broker", "Policy and financials", "Credit memo", "RM", "Underwriter", "Pricing and terms"] },
-  { id: "drawdown", name: "Development drawdowns", status: "Next", tone: "c-amber", what: "A quantity surveyor's report arrives for a drawdown on a development loan. The agents check the works against budget and programme, the facility terms and earlier drawdowns, then recommend the amount to release. A person approves.",
+  { id: "drawdown", name: "Development drawdowns", status: "Live", tone: "c-green", what: "A quantity surveyor's report arrives for a drawdown on a development loan. The agents check the works against budget and programme, the facility terms and earlier drawdowns, then recommend the amount to release. A person approves.",
     steps: ["QS report in", "Read and extract", "Budget and programme", "Facility terms", "Recommendation", "Approve and release"] },
-  { id: "review", name: "Annual reviews and covenant monitoring", status: "Possible", tone: "c-grey", what: "Each year, or each quarter, the agents read the latest accounts, rent roll and valuation, retest the covenants and flag cases moving towards a breach, with a draft review for the relationship team.",
+  { id: "review", name: "Annual reviews and covenant monitoring", status: "Live", tone: "c-green", what: "Each year, or each quarter, the agents read the latest accounts, rent roll and valuation, retest the covenants and flag cases moving towards a breach, with a draft review for the relationship team.",
     steps: ["Accounts and rent roll in", "Read and extract", "Covenant tests", "Early warning", "Draft review", "Credit sign-off"] },
-  { id: "renewal", name: "Renewals and refinancing", status: "Possible", tone: "c-grey", what: "Ahead of maturity, the agents pull the case history, refresh the figures and draft a renewal paper, so the RM starts from a memo rather than a blank page.",
+  { id: "renewal", name: "Renewals and refinancing", status: "Live", tone: "c-green", what: "Ahead of maturity, the agents pull the case history, refresh the figures and draft a renewal paper, so the RM starts from a memo rather than a blank page.",
     steps: ["Maturity alert", "Case history", "Refresh figures", "Draft paper", "RM", "Underwriter"] },
 ];
 function renderProcesses() {
@@ -1786,7 +1786,7 @@ function renderProcesses() {
     <p>${esc(p.what)}</p>
     <ol class="flowline">${p.steps.map((x) => `<li>${esc(x)}</li>`).join("")}</ol>
     ${p.id === "broker" ? `<div><button class="btn primary small" type="button" data-view="cases">Open broker submission</button></div>` : ""}</div>`;
-  return pageHead("Lending processes", "Lending processes", "NashFlow runs any document-heavy lending process the same way: agents read, check and draft, and a person decides. Each process follows the lender's own policy and steps. Broker submission is the one in this demo.") +
+  return pageHead("Lending processes", "Lending processes", "NashFlow runs any document-heavy lending process the same way: agents read, check and draft, and a person decides. Each process follows the lender's own policy and steps.") +
     `<div class="stack">${PROCESSES.map(card).join("")}</div>`;
 }
 function renderNav() {
