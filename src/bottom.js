@@ -405,16 +405,18 @@ function creditQuestions(c) {
 function rmView(c) { return (c.rmView = c.rmView || { a: {}, choice: {}, qa: {}, rec: "", recWhy: "", structure: null }); }
 function rmViewMissing(c) {
   const v = rmView(c); const miss = [];
-  RMV_QS.filter((x) => x.req).forEach((x) => { if (!(v.a[x.k] || "").trim()) miss.push(x.label); });
-  const cq = creditQuestions(c).filter((x) => !(v.qa[x.key] || "").trim()); if (cq.length) miss.push(`${cq.length} question${cq.length > 1 ? "s" : ""} credit will ask`);
+  if (!rmViewBody(v)) miss.push("Your view of the deal");
   if (!v.rec) miss.push("Your recommendation");
   return miss;
 }
+/* One free-text view; cases written before 10 Nov keep their separate answers */
+function rmViewBody(v) { return (v.a.view || "").trim() || RMV_QS.some((x) => (v.a[x.k] || "").trim()); }
 function rmViewStarted(c) { const v = c.rmView; return !!(v && (v.rec || Object.values(v.a).some((x) => (x || "").trim()))); }
 function rmViewText(c) {
   const v = c.rmView; if (!rmViewStarted(c)) return "";
   const parts = [];
   if (v.rec) parts.push(`**RM recommendation: ${v.rec}.**${v.recWhy ? " " + v.recWhy : ""}`);
+  if ((v.a.view || "").trim()) parts.push(v.a.view.trim());
   RMV_QS.forEach((x) => { const t = (v.a[x.k] || "").trim(); const ch = v.choice[x.k]; if (t || ch) parts.push(`**${x.label}${ch ? " (" + ch.toLowerCase() + ")" : ""}:** ${t || "-"}`); });
   const qa = creditQuestions(c).filter((x) => (v.qa[x.key] || "").trim());
   if (qa.length) parts.push("Questions credit will ask:\n\n" + qa.map((x) => `- **${x.text}** ${v.qa[x.key].trim()}`).join("\n"));
@@ -474,19 +476,19 @@ function rmAssessmentSec(c) {
   const t = rmViewText(c); const miss = rmViewMissing(c);
   const canEdit = currentRole === "Relationship Manager" && ["rm", "returned"].includes(stageOf(c));
   if (canEdit && miss.length) rmEditing = c.id; // keep the form open until the RM clicks Done
-  if (canEdit && rmEditing === c.id) return `<section class="memo-sec rmsec asking" id="rmsec"><header><h3>RM assessment</h3><span class="by">${miss.length ? "Your view. Still to add: " + esc(miss.join(", ")) : "Your view is complete"}</span></header>${rmViewForm(c)}<div class="row"><button class="btn primary small" type="button" data-act="rmv-done">Add to the memo</button><span class="note">Required: the sponsor, the deal story, credit's questions and your recommendation.</span></div></section>`;
+  if (canEdit && rmEditing === c.id) return `<section class="memo-sec rmsec asking" id="rmsec"><header><h3>RM assessment</h3><span class="by">${miss.length ? "Your view. Still to add: " + esc(miss.join(", ")) : "Your view is complete"}</span></header>${rmViewForm(c)}<div class="row"><button class="btn primary small" type="button" data-act="rmv-done">Add to the memo</button><span class="note">Required: your view and your recommendation.</span></div></section>`;
   return `<section class="memo-sec rmsec" id="rmsec"><header><h3>RM assessment</h3><span class="by">${t ? "Written by the Relationship Manager" : "Not added yet"}</span><span class="grow"></span>${canEdit ? `<button class="btn small" type="button" data-act="rmv-edit">Change</button>` : ""}</header><div class="memo-body">${t ? renderRich(t) : `<p class="note">The RM's own view of the sponsor, the property and the deal.</p>`}</div></section>`;
 }
 /* The questions only the RM can answer, asked inside the memo where the answers end up. */
 function rmViewForm(c) {
   const v = rmView(c); const cq = creditQuestions(c);
-  const opt = (k, val) => `<button class="opt" type="button" data-act="rmv-choice" data-key="${k}" data-choice="${esc(val)}" aria-pressed="${v.choice[k] === val}">${esc(val)}</button>`;
-  const qs = RMV_QS.map((x) => `<div class="rvq"><h3>${esc(x.label)}${x.req ? ` <span class="note">required</span>` : ""}</h3><p class="hint">${esc(x.ask)}</p>${x.choices ? `<div class="opts">${x.choices.map((ch) => opt(x.k, ch)).join("")}</div>` : ""}<textarea class="ed short" data-rmv="${x.k}" aria-label="${esc(x.label)}">${esc(v.a[x.k] || "")}</textarea></div>`).join("");
-  const cqs = cq.map((x) => `<div class="rvq"><h3>${esc(x.text)}</h3><p class="hint">${esc(x.why || "")}</p><textarea class="ed short" data-rmq="${esc(x.key)}" aria-label="${esc(x.text)}">${esc(v.qa[x.key] || "")}</textarea></div>`).join("");
   const recs = ["Support", "Support with conditions", "Do not support"];
+  const legacy = RMV_QS.filter((x) => (v.a[x.k] || "").trim()).map((x) => `${x.label}: ${v.a[x.k].trim()}`).join("\n\n");
   return `<div class="rmform"><p class="hint">The agents have read the pack and run the numbers. Add what only you know. It sits in the memo as your assessment, kept separate from the agents' work.</p>
-    ${qs}
-    ${cq.length ? `<div class="label">Questions credit will ask</div><p class="hint">Picked from the flags on this case. Answer them now so the Underwriter doesn't send it back.</p>${cqs}` : ""}
+    <div class="rvq"><h3>Your view of the deal <span class="note">required</span></h3>
+      <p class="hint">In your own words: the sponsor and whether you've met them, the site, why this deal and why now, the exit, and anything from the broker or the wider relationship.</p>
+      ${cq.length ? `<div class="label">Credit will ask</div><ul class="obs">${cq.map((x) => `<li>${esc(x.text)}</li>`).join("")}</ul>` : ""}
+      <textarea class="ed" data-rmv="view" rows="7" aria-label="Your view of the deal" placeholder="For example: Known to us for 8 years, two loans repaid early. I visited on 3 Nov and the units are well kept. Refinancing away from a bank leaving the sector; exit by refinance at maturity.">${esc(v.a.view || legacy)}</textarea></div>
     <div class="rvq"><h3>Your recommendation <span class="note">required</span></h3><div class="opts">${recs.map((r) => `<button class="opt" type="button" data-act="rmv-rec" data-choice="${r}" aria-pressed="${v.rec === r}">${r}</button>`).join("")}</div>
       <textarea class="ed short" data-rmv="__recWhy" aria-label="Why" placeholder="In a line or two, why">${esc(v.recWhy || "")}</textarea>
       ${c.rec ? `<p class="note">The agents recommend: ${esc(c.rec.label)}. To try a different structure, see Financials.</p>` : ""}</div></div>`;
@@ -1721,7 +1723,7 @@ document.addEventListener("click", async (e) => {
 /* the RM's view, the structure what-if and the custom stress test update as you type */
 document.addEventListener("input", (e) => {
   const t = e.target; const c = cur(); if (!c) return;
-  if (t.dataset.rmv) { const v = rmView(c); if (t.dataset.rmv === "__recWhy") v.recWhy = t.value; else v.a[t.dataset.rmv] = t.value; save(); }
+  if (t.dataset.rmv) { const v = rmView(c); if (t.dataset.rmv === "__recWhy") v.recWhy = t.value; else { v.a[t.dataset.rmv] = t.value; if (t.dataset.rmv === "view") RMV_QS.forEach((x) => delete v.a[x.k]); } save(); }
   else if (t.dataset.rmq) { rmView(c).qa[t.dataset.rmq] = t.value; save(); }
   else if (t.dataset.wi) { const w = wiState(c); w[t.dataset.wi] = t.dataset.wi === "amort" ? t.value === "1" : t.value === "" ? null : +t.value; save(); const o = $("#wiOut"); if (o) o.innerHTML = wiResult(c).html; }
   else if (t.dataset.stress) { const v = rmView(c); v.stress = v.stress || { shock: 0, rent: 0, value: 0 }; v.stress[t.dataset.stress] = +t.value || 0; save(); const o = $("#stressOut"); if (o) o.innerHTML = stressCustomHtml(c, stressOne(c, baseInputs(c), v.stress), baseInputs(c)); }
